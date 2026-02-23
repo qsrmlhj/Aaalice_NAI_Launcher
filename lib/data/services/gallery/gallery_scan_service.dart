@@ -38,8 +38,6 @@ typedef ScanProgressCallback = void Function({
 });
 
 /// 扫描优先级
-/// - [high]: UI触发的扫描，需要快速响应
-/// - [low]: 后台扫描操作，主动让出时间片避免阻塞UI
 enum ScanPriority { high, low }
 
 /// 批量解析结果（从 isolate 返回）
@@ -50,24 +48,19 @@ class _ParseResult {
   _ParseResult(this.results, this.errors);
 }
 
-/// 画廊扫描服务（智能版）
+/// 画廊扫描服务
 ///
 /// 策略：
-/// - 小批量（<=500张）：主线程直接处理，避免 isolate 开销
-/// - 大批量（>500张）：使用 isolate 批量解析元数据
+/// - 小批量（<=500张）：主线程直接处理
+/// - 大批量（>500张）：使用 isolate 批量解析
 class GalleryScanService {
   final GalleryDataSource _dataSource;
 
   static const List<String> _supportedExtensions = ['.png', '.jpg', '.jpeg', '.webp'];
   static const int _batchSize = 50;
-
-  /// 使用 isolate 的阈值
   static const int _isolateThreshold = 500;
-
-  /// 高优先级扫描延迟（毫秒）- 用于 UI 触发的扫描
-  static const int _kHighPriorityDelayMs = 10;
-  /// 低优先级扫描延迟（毫秒）- 用于后台扫描，避免阻塞 UI
-  static const int _kLowPriorityDelayMs = 50;
+  static const int _highPriorityDelayMs = 10;
+  static const int _lowPriorityDelayMs = 50;
 
   GalleryScanService({required GalleryDataSource dataSource}) : _dataSource = dataSource;
 
@@ -76,10 +69,6 @@ class GalleryScanService {
     _instance ??= GalleryScanService(dataSource: GalleryDataSource());
     return _instance!;
   }
-
-  // ============================================================
-  // 公开API
-  // ============================================================
 
   /// 检测需要处理的文件数量
   Future<(int, int)> detectFilesNeedProcessing(Directory rootDir) async {
@@ -123,11 +112,9 @@ class GalleryScanService {
       onProgress?.call(processed: 0, total: 0, phase: 'checking');
       final existingFiles = await _getAllFileHashes();
 
-      // 收集最近的文件
       final recentFiles = await _collectRecentFiles(rootDir, maxFiles: maxFiles);
       result.filesScanned = recentFiles.length;
 
-      // 筛选出需要处理的文件
       final filesToProcess = <File>[];
       for (final file in recentFiles) {
         final path = file.path;
@@ -150,7 +137,6 @@ class GalleryScanService {
         'GalleryScanService',
       );
 
-      // 处理文件
       if (filesToProcess.isNotEmpty) {
         await _processFilesSmart(
           filesToProcess,
@@ -160,7 +146,6 @@ class GalleryScanService {
           priority: priority,
         );
       }
-
     } catch (e, stack) {
       AppLogger.e('Quick startup scan failed', e, stack, 'GalleryScanService');
       result.errors.add(e.toString());
@@ -196,7 +181,6 @@ class GalleryScanService {
       }
       result.filesScanned = currentFiles.length;
 
-      // 检测需要处理的文件
       final filesToProcess = <File>[];
       for (final file in currentFiles) {
         final path = file.path;
@@ -214,7 +198,6 @@ class GalleryScanService {
         }
       }
 
-      // 处理文件
       if (filesToProcess.isNotEmpty) {
         await _processFilesSmart(
           filesToProcess,
@@ -225,14 +208,12 @@ class GalleryScanService {
         );
       }
 
-      // 标记已删除的文件
       final currentPaths = currentFiles.map((f) => f.path).toSet();
       final deletedPaths = existingPaths.difference(currentPaths);
       if (deletedPaths.isNotEmpty) {
         await _dataSource.batchMarkAsDeleted(deletedPaths.toList());
         result.filesDeleted = deletedPaths.length;
       }
-
     } catch (e, stack) {
       AppLogger.e('Incremental scan failed', e, stack, 'GalleryScanService');
       result.errors.add(e.toString());
@@ -268,7 +249,6 @@ class GalleryScanService {
         onProgress: onProgress,
         priority: priority,
       );
-
     } catch (e, stack) {
       AppLogger.e('Full scan failed', e, stack, 'GalleryScanService');
       result.errors.add(e.toString());
@@ -282,17 +262,7 @@ class GalleryScanService {
     return result;
   }
 
-  /// 查漏补缺：为数据库中缺少元数据的图片重新解析元数据
-  ///
-  /// 适用于：
-  /// - 从旧数据库迁移的图片没有元数据
-  /// - 之前扫描时元数据解析失败
-  /// - 手动复制到文件夹的图片
-  ///
-  /// 实现特点：
-  /// - 使用后台 isolate 批量解析元数据
-  /// - 批次间 yield 让出时间片，避免阻塞 UI
-  /// - 及时释放数据库连接压力
+  /// 查漏补缺：为缺少元数据的图片重新解析
   Future<ScanResult> fillMissingMetadata({
     ScanProgressCallback? onProgress,
     int batchSize = 100,
@@ -304,22 +274,17 @@ class GalleryScanService {
     AppLogger.i('开始查漏补缺：查找缺少元数据的图片', 'GalleryScanService');
 
     try {
-      // 获取所有非删除状态的图片
       final allImages = await _dataSource.getAllImages();
       result.filesScanned = allImages.length;
 
-      // 筛选出 PNG 文件且缺少元数据的
       final filesNeedMetadata = <File>[];
-      final imageIdMap = <String, int>{}; // path -> imageId
+      final imageIdMap = <String, int>{};
 
       for (final image in allImages) {
         if (image.isDeleted) continue;
-
-        final ext = p.extension(image.filePath).toLowerCase();
-        if (ext != '.png') continue; // 只处理 PNG（可能有 NAI 元数据）
-
-        // 检查是否已有有效元数据（prompt 为空表示没有解析到元数据）
+        if (p.extension(image.filePath).toLowerCase() != '.png') continue;
         if (image.id == null) continue;
+
         final metadata = await _dataSource.getMetadataByImageId(image.id!);
         if (metadata == null || metadata.prompt.isEmpty) {
           final file = File(image.filePath);
@@ -340,7 +305,6 @@ class GalleryScanService {
         return result;
       }
 
-      // 使用 isolate 批量处理，避免阻塞主线程
       await _processMetadataBatchesWithIsolate(
         filesNeedMetadata,
         imageIdMap,
@@ -354,7 +318,6 @@ class GalleryScanService {
         '查漏补缺完成: ${result.filesUpdated} 张图片已更新元数据',
         'GalleryScanService',
       );
-
     } catch (e, stack) {
       AppLogger.e('查漏补缺失败', e, stack, 'GalleryScanService');
       result.errors.add(e.toString());
@@ -366,12 +329,6 @@ class GalleryScanService {
     return result;
   }
 
-  /// 使用 Isolate 批量处理元数据补充
-  ///
-  /// 特点：
-  /// - 在 isolate 中解析元数据，避免阻塞 UI
-  /// - 批次间 yield 让出时间片
-  /// - 每批处理完后释放数据库连接压力
   Future<void> _processMetadataBatchesWithIsolate(
     List<File> files,
     Map<String, int> imageIdMap,
@@ -395,7 +352,6 @@ class GalleryScanService {
         phase: 'filling_metadata_batch_$batchNum',
       );
 
-      // 读取文件字节
       final paths = <String>[];
       final bytesList = <Uint8List>[];
 
@@ -411,10 +367,8 @@ class GalleryScanService {
 
       if (paths.isEmpty) continue;
 
-      // 在 isolate 中批量解析元数据
       final parseResult = await _parseInIsolate(paths, bytesList);
 
-      // 写入数据库（只更新元数据，不更新图片记录）
       for (var j = 0; j < parseResult.results.length; j++) {
         final res = parseResult.results[j];
         final imageId = imageIdMap[res.path];
@@ -423,8 +377,6 @@ class GalleryScanService {
           try {
             await _dataSource.upsertMetadata(imageId, res.metadata!);
             result.filesUpdated++;
-
-            // 将解析的元数据填充到 ImageMetadataService 缓存，避免重复解析
             ImageMetadataService().cacheMetadata(res.path, res.metadata!);
           } catch (e) {
             result.errors.add('${res.path}: $e');
@@ -442,21 +394,14 @@ class GalleryScanService {
         phase: 'filling_metadata',
       );
 
-      // 让出时间片，避免阻塞 UI，同时释放数据库连接压力
-      // 后台操作使用更长的延迟以优先处理 UI 操作
-      final delayMs = priority == ScanPriority.low ? _kLowPriorityDelayMs : _kHighPriorityDelayMs;
+      final delayMs = priority == ScanPriority.low ? _lowPriorityDelayMs : _highPriorityDelayMs;
       await Future.delayed(Duration(milliseconds: delayMs));
     }
 
-    onProgress?.call(
-      processed: totalFiles,
-      total: totalFiles,
-      phase: 'completed',
-    );
+    onProgress?.call(processed: totalFiles, total: totalFiles, phase: 'completed');
   }
 
   /// 处理指定文件
-  /// [priority] 扫描优先级，默认为 [ScanPriority.low]
   Future<void> processFiles(List<File> files, {ScanPriority priority = ScanPriority.low}) async {
     if (files.isEmpty) return;
 
@@ -475,11 +420,6 @@ class GalleryScanService {
     await _dataSource.batchMarkAsDeleted(paths);
   }
 
-  // ============================================================
-  // 私有方法
-  // ============================================================
-
-  /// 获取所有文件哈希
   Future<Map<String, String>> _getAllFileHashes() async {
     try {
       final images = await _dataSource.getAllImages();
@@ -490,7 +430,6 @@ class GalleryScanService {
     }
   }
 
-  /// 智能处理文件（根据数量选择策略）
   Future<void> _processFilesSmart(
     List<File> files,
     ScanResult result, {
@@ -498,7 +437,6 @@ class GalleryScanService {
     ScanProgressCallback? onProgress,
     ScanPriority priority = ScanPriority.low,
   }) async {
-    // 小批量：主线程直接处理
     if (files.length <= _isolateThreshold) {
       AppLogger.d('Processing ${files.length} files in main thread', 'GalleryScanService');
       await _processInMainThread(
@@ -509,7 +447,6 @@ class GalleryScanService {
         priority: priority,
       );
     } else {
-      // 大批量：使用 isolate
       AppLogger.d('Processing ${files.length} files with isolate', 'GalleryScanService');
       await _processWithIsolate(
         files,
@@ -521,7 +458,6 @@ class GalleryScanService {
     }
   }
 
-  /// 在主线程处理（小批量）
   Future<void> _processInMainThread(
     List<File> files,
     ScanResult result, {
@@ -546,17 +482,13 @@ class GalleryScanService {
         phase: 'indexing',
       );
 
-      // 让出时间片，避免阻塞UI
-      // 后台操作使用更长的延迟以优先处理 UI 操作
-      if (priority == ScanPriority.low) {
-        await Future.delayed(const Duration(milliseconds: _kLowPriorityDelayMs));
-      } else {
-        await Future.delayed(Duration.zero);
-      }
+      final delay = priority == ScanPriority.low
+          ? const Duration(milliseconds: _lowPriorityDelayMs)
+          : Duration.zero;
+      await Future.delayed(delay);
     }
   }
 
-  /// 使用 Isolate 处理（大批量）
   Future<void> _processWithIsolate(
     List<File> files,
     ScanResult result, {
@@ -569,7 +501,6 @@ class GalleryScanService {
     for (var i = 0; i < files.length; i += _batchSize) {
       final batch = files.skip(i).take(_batchSize).toList();
 
-      // 读取文件字节
       final paths = <String>[];
       final bytesList = <Uint8List>[];
 
@@ -585,10 +516,8 @@ class GalleryScanService {
 
       if (paths.isEmpty) continue;
 
-      // 在 isolate 中批量解析
       final parseResult = await _parseInIsolate(paths, bytesList);
 
-      // 写入数据库并填充到 ImageMetadataService 缓存
       for (var j = 0; j < parseResult.results.length; j++) {
         final res = parseResult.results[j];
         await _writeToDatabase(
@@ -600,7 +529,6 @@ class GalleryScanService {
           isFullScan: isFullScan,
         );
 
-        // 将解析的元数据填充到 ImageMetadataService 缓存，避免重复解析
         if (res.metadata != null && res.metadata!.hasData) {
           ImageMetadataService().cacheMetadata(res.path, res.metadata!);
         }
@@ -616,17 +544,13 @@ class GalleryScanService {
         phase: 'indexing',
       );
 
-      // 让出时间片，避免阻塞UI
-      // 后台操作使用更长的延迟以优先处理 UI 操作
-      if (priority == ScanPriority.low) {
-        await Future.delayed(const Duration(milliseconds: _kLowPriorityDelayMs));
-      } else {
-        await Future.delayed(Duration.zero);
-      }
+      final delay = priority == ScanPriority.low
+          ? const Duration(milliseconds: _lowPriorityDelayMs)
+          : Duration.zero;
+      await Future.delayed(delay);
     }
   }
 
-  /// 在 isolate 中批量解析元数据
   Future<_ParseResult> _parseInIsolate(List<String> paths, List<Uint8List> bytesList) async {
     return await Isolate.run(() async {
       final results = <({String path, NaiImageMetadata? metadata, int? width, int? height})>[];
@@ -659,7 +583,6 @@ class GalleryScanService {
     });
   }
 
-  /// 写入数据库
   Future<void> _writeToDatabase(
     String path,
     NaiImageMetadata? metadata,
@@ -677,6 +600,20 @@ class GalleryScanService {
       final aspectRatio = (width != null && height != null && height > 0)
           ? width / height
           : null;
+
+      final existingIdByHash = await _dataSource.getImageIdByHash(fileHash);
+      if (existingIdByHash != null) {
+        final existingRecord = await _dataSource.getImageById(existingIdByHash);
+        if (existingRecord != null && existingRecord.filePath != path) {
+          AppLogger.i(
+            'Detected renamed file: ${existingRecord.filePath} -> $path',
+            'GalleryScanService',
+          );
+          await _handleRenamedFile(existingIdByHash, path, fileName, stat, result);
+          ImageMetadataService().notifyPathChanged(existingRecord.filePath, path);
+          return;
+        }
+      }
 
       final imageId = await _dataSource.upsertImage(
         filePath: path,
@@ -699,7 +636,7 @@ class GalleryScanService {
         result.filesAdded++;
       } else {
         final existingId = await _dataSource.getImageIdByPath(path);
-        if (existingId != null) {
+        if (existingId != null && existingId != imageId) {
           result.filesUpdated++;
         } else {
           result.filesAdded++;
@@ -710,7 +647,23 @@ class GalleryScanService {
     }
   }
 
-  /// 处理单个文件（主线程）
+  Future<void> _handleRenamedFile(
+    int imageId,
+    String newPath,
+    String newFileName,
+    FileStat stat,
+    ScanResult result,
+  ) async {
+    try {
+      await _dataSource.updateFilePath(imageId, newPath, newFileName: newFileName);
+      result.filesUpdated++;
+      AppLogger.d('Updated path for image $imageId: $newPath', 'GalleryScanService');
+    } catch (e, stack) {
+      AppLogger.e('Failed to handle renamed file: $newPath', e, stack, 'GalleryScanService');
+      result.errors.add('$newPath: $e');
+    }
+  }
+
   Future<void> _processSingleFile(
     File file,
     ScanResult result, {
@@ -720,10 +673,8 @@ class GalleryScanService {
     int? width;
     int? height;
 
-    // 提取 PNG 元数据
     if (p.extension(file.path).toLowerCase() == '.png') {
       try {
-        // 使用 ImageMetadataService 统一入口，享受 LRU 缓存和流式解析优化
         metadata = await ImageMetadataService().getMetadata(file.path);
         width = metadata?.width;
         height = metadata?.height;
@@ -733,7 +684,6 @@ class GalleryScanService {
       }
     }
 
-    // 复用数据库写入逻辑
     await _writeToDatabase(
       file.path,
       metadata,
@@ -744,7 +694,6 @@ class GalleryScanService {
     );
   }
 
-  /// 收集目录下所有图片文件
   Future<List<File>> _collectImageFiles(Directory dir) async {
     final files = <File>[];
     await for (final file in _scanDirectory(dir)) {
@@ -753,7 +702,6 @@ class GalleryScanService {
     return files;
   }
 
-  /// 收集最近的N个图片文件
   Future<List<File>> _collectRecentFiles(Directory dir, {required int maxFiles}) async {
     final filesWithTime = <File, DateTime>{};
 
@@ -772,7 +720,6 @@ class GalleryScanService {
     return sortedEntries.take(maxFiles).map((e) => e.key).toList();
   }
 
-  /// 递归扫描目录
   Stream<File> _scanDirectory(Directory dir) async* {
     if (!await dir.exists()) return;
 
@@ -786,7 +733,6 @@ class GalleryScanService {
     }
   }
 
-  /// 计算文件快速哈希
   Future<String> _computeFileHash(File file) async {
     try {
       final stat = await file.stat();

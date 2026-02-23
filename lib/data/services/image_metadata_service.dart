@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:hive/hive.dart';
 
 import '../../core/constants/storage_keys.dart';
@@ -12,62 +13,29 @@ import '../models/gallery/nai_image_metadata.dart';
 
 /// 图像元数据服务
 ///
-/// 统一的元数据解析服务入口，所有场景（主页、本地画廊、拖拽）都使用此服务。
-///
-/// 架构：
-/// - 对外统一接口，内部自动处理缓存
-/// - 使用 Hive 持久缓存（重启后仍然有效）
-/// - 内存缓存作为加速层（实现细节，对调用方透明）
-/// - 预加载队列支持批量后台解析
+/// 统一的元数据解析服务入口，使用文件内容哈希作为缓存键，支持重命名免疫。
 class ImageMetadataService {
   static final ImageMetadataService _instance = ImageMetadataService._internal();
   factory ImageMetadataService() => _instance;
   ImageMetadataService._internal();
 
-  // ============================================================
-  // 配置常量
-  // ============================================================
-
-  /// 内存缓存容量（加速层）
   static const int _memoryCacheCapacity = 500;
-
-  /// 流式解析读取的前N字节数（50KB）
   static const int _streamBufferSize = 50 * 1024;
-
-  /// 预加载并发数
   static const int _preloadConcurrency = 3;
-
-  /// 预加载队列最大长度
   static const int _maxQueueSize = 100;
+  static const int _currentCacheVersion = 2;
 
-  // ============================================================
-  // 状态
-  // ============================================================
-
-  /// Hive Box（持久缓存）
   Box<String>? _persistentBox;
-
-  /// 内存缓存（path -> metadata）
   final _memoryCache = _LRUCache<String, NaiImageMetadata>(capacity: _memoryCacheCapacity);
-
-  /// 正在解析中的任务（防止重复解析）
+  final _pathToHashMap = <String, String>{};
+  final _hashToPathsMap = <String, Set<String>>{};
   final _pendingFutures = <String, Future<NaiImageMetadata?>>{};
-
-  /// 文件解析信号量（标准优先级，后台批量处理）
+  final _pendingHashFutures = <String, Future<String>>{};
   final _fileSemaphore = _Semaphore(3);
-
-  /// 高优先级信号量（前台用户请求）
-  /// 独立槽位确保用户操作不受后台队列影响
   final _highPrioritySemaphore = _Semaphore(2);
-
-  /// 预加载队列
   final _preloadQueue = <_PreloadTask>[];
   final _processingTaskIds = <String>{};
   bool _isProcessingQueue = false;
-
-  // ============================================================
-  // 统计
-  // ============================================================
 
   int _cacheHits = 0;
   int _cacheMisses = 0;
@@ -76,22 +44,19 @@ class ImageMetadataService {
   int _parseErrors = 0;
   int _preloadSuccessCount = 0;
   int _preloadErrorCount = 0;
+  int _hashComputeCount = 0;
+  int _hashCacheHitCount = 0;
 
-  // ============================================================
-  // 初始化
-  // ============================================================
-
-  /// 初始化服务（在应用启动时调用）
   Future<void> initialize() async {
     if (_persistentBox != null && _persistentBox!.isOpen) return;
 
     try {
-      // 检查 Box 是否已被其他代码打开
-      if (Hive.isBoxOpen(StorageKeys.localMetadataCacheBox)) {
-        _persistentBox = Hive.box<String>(StorageKeys.localMetadataCacheBox);
-      } else {
-        _persistentBox = await Hive.openBox<String>(StorageKeys.localMetadataCacheBox);
-      }
+      _persistentBox = Hive.isBoxOpen(StorageKeys.localMetadataCacheBox)
+          ? Hive.box<String>(StorageKeys.localMetadataCacheBox)
+          : await Hive.openBox<String>(StorageKeys.localMetadataCacheBox);
+
+      await _migrateCacheIfNeeded();
+
       AppLogger.i(
         'ImageMetadataService initialized: persistent cache has ${_persistentBox!.length} entries',
         'ImageMetadataService',
@@ -102,6 +67,26 @@ class ImageMetadataService {
     }
   }
 
+  Future<void> _migrateCacheIfNeeded() async {
+    try {
+      final box = _persistentBox!;
+      final storedVersion = int.tryParse(box.get('_cacheVersion') ?? '1') ?? 1;
+
+      if (storedVersion < _currentCacheVersion) {
+        AppLogger.i(
+          'Cache migration needed: v$storedVersion -> v$_currentCacheVersion',
+          'ImageMetadataService',
+        );
+        await clearCache();
+        await box.put('_cacheVersion', _currentCacheVersion.toString());
+        AppLogger.i('Cache migrated to version $_currentCacheVersion', 'ImageMetadataService');
+      }
+    } catch (e) {
+      AppLogger.w('Cache version check failed, clearing cache', 'ImageMetadataService');
+      await clearCache();
+    }
+  }
+
   Box<String> _getBox() {
     if (_persistentBox == null || !_persistentBox!.isOpen) {
       throw StateError('ImageMetadataService not initialized. Call initialize() first.');
@@ -109,285 +94,286 @@ class ImageMetadataService {
     return _persistentBox!;
   }
 
-  // ============================================================
-  // 对外 API
-  // ============================================================
-
   /// 前台立即获取元数据（高优先级）
-  ///
-  /// **使用场景**：用户主动打开图像详情页
-  /// **特点**：
-  /// - 最高优先级，不受后台预加载队列影响
-  /// - 立即开始解析，不加入队列等待
-  /// - 如果同文件正在被后台处理，共享结果
-  ///
-  /// [path] 文件路径
   Future<NaiImageMetadata?> getMetadataImmediate(String path) async {
-    // 1. 内存缓存检查
-    final memoryCached = _memoryCache.get(path);
+    final hash = await _getFileHash(path);
+
+    final memoryCached = _memoryCache.get(hash);
     if (memoryCached != null) {
       _cacheHits++;
-      AppLogger.d('Memory cache hit (immediate): $path', 'ImageMetadataService');
       return memoryCached;
     }
 
-    // 2. 持久缓存检查
-    final persistentCached = _getFromPersistentCache(path);
+    final persistentCached = _getFromPersistentCache(hash);
     if (persistentCached != null) {
       _cacheHits++;
-      _memoryCache.put(path, persistentCached);
-      AppLogger.d('Persistent cache hit (immediate): $path', 'ImageMetadataService');
+      _memoryCache.put(hash, persistentCached);
       return persistentCached;
     }
 
     _cacheMisses++;
 
-    // 3. 检查是否正在解析中（后台或前台）
-    if (_pendingFutures.containsKey(path)) {
-      AppLogger.d('Already loading (sharing): $path', 'ImageMetadataService');
-      return _pendingFutures[path]!;
+    if (_pendingFutures.containsKey(hash)) {
+      return _pendingFutures[hash]!;
     }
 
-    // 4. 立即开始解析（高优先级）
-    // 从后台队列中移除（如果存在）
-    _removeFromPreloadQueue(path);
-
-    // 使用高优先级信号量槽位
+    _removeFromPreloadQueue(hash);
     await _highPrioritySemaphore.acquire();
 
-    // 双重检查
-    final doubleCheck = _memoryCache.get(path);
+    final doubleCheck = _memoryCache.get(hash);
     if (doubleCheck != null) {
       _highPrioritySemaphore.release();
       return doubleCheck;
     }
 
-    AppLogger.i('Immediate parse started: $path', 'ImageMetadataService');
-    final future = _parseAndCache(path, forceFullParse: false);
-    _pendingFutures[path] = future;
+    final future = _parseAndCache(path, hash: hash, forceFullParse: false);
+    _pendingFutures[hash] = future;
 
     try {
-      final result = await future;
-      AppLogger.i('Immediate parse completed: $path', 'ImageMetadataService');
-      return result;
+      return await future;
     } finally {
-      _pendingFutures.remove(path);
+      _pendingFutures.remove(hash);
       _highPrioritySemaphore.release();
     }
   }
 
   /// 从文件路径获取元数据（标准入口）
-  ///
-  /// **使用场景**：后台预加载、批量处理
-  /// **特点**：
-  /// - 标准优先级
-  /// - 可能被前台请求打断或共享
-  ///
-  /// 自动处理以下逻辑：
-  /// 1. 检查内存缓存（快速返回）
-  /// 2. 检查持久缓存（加载到内存后返回）
-  /// 3. 解析文件（并存入两级缓存）
   Future<NaiImageMetadata?> getMetadata(
     String path, {
     bool forceFullParse = false,
   }) async {
-    // 1. 内存缓存检查
-    final memoryCached = _memoryCache.get(path);
+    final hash = await _getFileHash(path);
+
+    final memoryCached = _memoryCache.get(hash);
     if (memoryCached != null) {
       _cacheHits++;
-      AppLogger.d('Memory cache hit: $path', 'ImageMetadataService');
       return memoryCached;
     }
 
-    // 2. 持久缓存检查
-    final persistentCached = _getFromPersistentCache(path);
+    final persistentCached = _getFromPersistentCache(hash);
     if (persistentCached != null) {
       _cacheHits++;
-      // 回填内存缓存
-      _memoryCache.put(path, persistentCached);
-      AppLogger.d('Persistent cache hit: $path', 'ImageMetadataService');
+      _memoryCache.put(hash, persistentCached);
       return persistentCached;
     }
 
     _cacheMisses++;
 
-    // 3. 检查是否正在解析中
-    if (_pendingFutures.containsKey(path)) {
-      AppLogger.d('Already loading: $path', 'ImageMetadataService');
-      return _pendingFutures[path]!;
+    if (_pendingFutures.containsKey(hash)) {
+      return _pendingFutures[hash]!;
     }
 
-    // 4. 文件解析（标准优先级）
     await _fileSemaphore.acquire();
 
-    // 双重检查（可能在等待信号量期间其他线程已完成）
-    final doubleCheck = _memoryCache.get(path);
+    final doubleCheck = _memoryCache.get(hash);
     if (doubleCheck != null) {
       _fileSemaphore.release();
       return doubleCheck;
     }
 
-    final future = _parseAndCache(path, forceFullParse: forceFullParse);
-    _pendingFutures[path] = future;
+    final future = _parseAndCache(path, hash: hash, forceFullParse: forceFullParse);
+    _pendingFutures[hash] = future;
 
     try {
       return await future;
     } finally {
-      _pendingFutures.remove(path);
+      _pendingFutures.remove(hash);
       _fileSemaphore.release();
     }
   }
 
-  /// 从字节数组获取元数据（用于拖拽、生成的图像等）
-  ///
-  /// [cacheKey] 可选的缓存键（如后续会保存的文件路径），用于持久化缓存
+  /// 从字节数组获取元数据
   Future<NaiImageMetadata?> getMetadataFromBytes(
     Uint8List bytes, {
     String? cacheKey,
   }) async {
-    final key = cacheKey ?? _computeBytesHash(bytes);
+    final hash = sha256.convert(bytes).toString();
 
-    // 1. 内存缓存检查
-    final memoryCached = _memoryCache.get(key);
+    final memoryCached = _memoryCache.get(hash);
     if (memoryCached != null) {
       _cacheHits++;
       return memoryCached;
     }
 
-    // 2. 持久缓存检查（如果有 cacheKey）
-    if (cacheKey != null) {
-      final persistentCached = _getFromPersistentCache(cacheKey);
-      if (persistentCached != null) {
-        _cacheHits++;
-        _memoryCache.put(key, persistentCached);
-        return persistentCached;
-      }
+    final persistentCached = _getFromPersistentCache(hash);
+    if (persistentCached != null) {
+      _cacheHits++;
+      _memoryCache.put(hash, persistentCached);
+      return persistentCached;
     }
 
     _cacheMisses++;
 
-    // 3. 检查是否正在解析中
-    if (_pendingFutures.containsKey(key)) {
-      return _pendingFutures[key]!;
+    if (_pendingFutures.containsKey(hash)) {
+      return _pendingFutures[hash]!;
     }
 
-    // 4. 字节解析
-    final future = _parseBytesAndCache(bytes, cacheKey: cacheKey);
-    _pendingFutures[key] = future;
+    final future = _parseBytesAndCache(bytes, hash: hash);
+    _pendingFutures[hash] = future;
 
     try {
       return await future;
     } finally {
-      _pendingFutures.remove(key);
+      _pendingFutures.remove(hash);
     }
   }
 
-  /// 将图像加入预加载队列（后台解析）
-  ///
-  /// 用于生成完成后批量预解析，不阻塞主流程
+  /// 将图像加入预加载队列
   void enqueuePreload({
     required String taskId,
     String? filePath,
     Uint8List? bytes,
   }) {
-    // 检查是否已缓存
-    if (filePath != null && (_memoryCache.get(filePath) != null || _isInPersistentCache(filePath))) {
-      return;
-    }
-
-    // 检查是否已在队列中
     if (_preloadQueue.any((t) => t.taskId == taskId) || _processingTaskIds.contains(taskId)) {
       return;
     }
 
-    // 队列满了则移除最旧的任务
     if (_preloadQueue.length >= _maxQueueSize) {
       _preloadQueue.removeAt(0);
       AppLogger.w('Preload queue full, dropped oldest task', 'ImageMetadataService');
     }
 
-    _preloadQueue.add(
-      _PreloadTask(
-        taskId: taskId,
-        filePath: filePath,
-        bytes: bytes,
-      ),
-    );
-
+    _preloadQueue.add(_PreloadTask(taskId: taskId, filePath: filePath, bytes: bytes));
     _processPreloadQueue();
   }
 
-  /// 批量预加载
   void enqueuePreloadBatch(List<GeneratedImageInfo> images) {
     for (final image in images) {
-      enqueuePreload(
-        taskId: image.id,
-        filePath: image.filePath,
-        bytes: image.bytes,
-      );
+      enqueuePreload(taskId: image.id, filePath: image.filePath, bytes: image.bytes);
     }
   }
 
-  /// 手动缓存元数据（用于外部已解析的元数据）
-  void cacheMetadata(String path, NaiImageMetadata metadata) {
+  /// 手动缓存元数据
+  Future<void> cacheMetadata(String path, NaiImageMetadata metadata) async {
     if (!metadata.hasData) return;
-    _memoryCache.put(path, metadata);
-    _saveToPersistentCache(path, metadata);
+
+    final hash = await _getFileHash(path);
+    _memoryCache.put(hash, metadata);
+    await _saveToPersistentCache(hash, metadata);
   }
 
   /// 获取缓存统计
-  Map<String, dynamic> getStats() {
-    return {
-      'memoryCacheSize': _memoryCache.length,
-      'persistentCacheSize': _persistentBox?.length ?? 0,
-      'cacheHits': _cacheHits,
-      'cacheMisses': _cacheMisses,
-      'hitRate': _cacheHits + _cacheMisses > 0
-          ? '${(_cacheHits / (_cacheHits + _cacheMisses) * 100).toStringAsFixed(1)}%'
-          : 'N/A',
-      'fastParseCount': _fastParseCount,
-      'fallbackParseCount': _fallbackParseCount,
-      'parseErrors': _parseErrors,
-      'preloadQueue': {
-        'queueLength': _preloadQueue.length,
-        'processingCount': _processingTaskIds.length,
-        'successCount': _preloadSuccessCount,
-        'errorCount': _preloadErrorCount,
-      },
-    };
-  }
-
-  /// 获取缓存中的元数据（同步，可能为 null）
-  ///
-  /// 注意：此方法只检查内存缓存，不查询持久缓存（异步）
-  NaiImageMetadata? getCached(String path) {
-    return _memoryCache.get(path);
-  }
-
-  /// 预加载指定路径的元数据（后台）
-  void preload(String path) {
-    enqueuePreload(taskId: path, filePath: path);
-  }
-
-  /// 批量预加载（兼容旧 API）
-  void preloadBatch(List<GeneratedImageInfo> images) {
-    enqueuePreloadBatch(images);
-  }
-
-  /// 获取预加载队列状态
-  Map<String, dynamic> getPreloadQueueStatus() {
-    return {
+  Map<String, dynamic> getStats() => {
+    'memoryCacheSize': _memoryCache.length,
+    'persistentCacheSize': _persistentBox?.length ?? 0,
+    'cacheHits': _cacheHits,
+    'cacheMisses': _cacheMisses,
+    'hitRate': _cacheHits + _cacheMisses > 0
+        ? '${(_cacheHits / (_cacheHits + _cacheMisses) * 100).toStringAsFixed(1)}%'
+        : 'N/A',
+    'fastParseCount': _fastParseCount,
+    'fallbackParseCount': _fallbackParseCount,
+    'parseErrors': _parseErrors,
+    'hashComputeCount': _hashComputeCount,
+    'hashCacheHitCount': _hashCacheHitCount,
+    'pathToHashMapSize': _pathToHashMap.length,
+    'preloadQueue': {
       'queueLength': _preloadQueue.length,
       'processingCount': _processingTaskIds.length,
-      'isProcessing': _isProcessingQueue,
       'successCount': _preloadSuccessCount,
       'errorCount': _preloadErrorCount,
-    };
+    },
+  };
+
+  /// 通知路径变更（文件重命名检测）
+  void notifyPathChanged(String oldPath, String newPath) {
+    final hash = _pathToHashMap[oldPath];
+    if (hash == null) return;
+
+    _pathToHashMap.remove(oldPath);
+    _pathToHashMap[newPath] = hash;
+
+    final pathSet = _hashToPathsMap[hash];
+    if (pathSet != null) {
+      pathSet.remove(oldPath);
+      pathSet.add(newPath);
+    }
+
+    AppLogger.d('Path changed: $oldPath -> $newPath (hash: ${hash.substring(0, 8)}...)', 'ImageMetadataService');
   }
 
-  /// 从后台预加载队列中移除指定任务
-  ///
-  /// 当用户主动打开图像时调用，避免重复处理
+  /// 获取文件哈希（带缓存）
+  Future<String> _getFileHash(String path) async {
+    final cachedHash = _pathToHashMap[path];
+    if (cachedHash != null) {
+      _hashCacheHitCount++;
+      return cachedHash;
+    }
+
+    if (_pendingHashFutures.containsKey(path)) {
+      return _pendingHashFutures[path]!;
+    }
+
+    final future = _computeFileHash(path);
+    _pendingHashFutures[path] = future;
+
+    try {
+      final hash = await future;
+      _pathToHashMap[path] = hash;
+      _hashToPathsMap.putIfAbsent(hash, () => {}).add(path);
+      _hashComputeCount++;
+      return hash;
+    } finally {
+      _pendingHashFutures.remove(path);
+    }
+  }
+
+  /// 计算文件采样哈希（SHA256）
+  Future<String> _computeFileHash(String path) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) return '';
+
+      final stat = await file.stat();
+      final fileSize = stat.size;
+
+      if (fileSize <= 16384) {
+        final bytes = await file.readAsBytes();
+        return sha256.convert(bytes).toString();
+      }
+
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        final headBytes = await raf.read(8192);
+        await raf.setPosition(fileSize - 8192);
+        final tailBytes = await raf.read(8192);
+
+        final combined = Uint8List(headBytes.length + tailBytes.length + 8);
+        combined.setAll(0, headBytes);
+        combined.setAll(headBytes.length, tailBytes);
+
+        final sizeBytes = ByteData(8);
+        sizeBytes.setInt64(0, fileSize);
+        combined.setAll(headBytes.length + tailBytes.length, sizeBytes.buffer.asUint8List());
+
+        return sha256.convert(combined).toString();
+      } finally {
+        await raf.close();
+      }
+    } catch (e) {
+      AppLogger.w('Failed to compute file hash: $path', 'ImageMetadataService');
+      return '';
+    }
+  }
+
+  /// 从内存缓存获取元数据（同步）
+  NaiImageMetadata? getCached(String path) {
+    final cachedHash = _pathToHashMap[path];
+    return cachedHash != null ? _memoryCache.get(cachedHash) : null;
+  }
+
+  void preload(String path) => enqueuePreload(taskId: path, filePath: path);
+
+  void preloadBatch(List<GeneratedImageInfo> images) => enqueuePreloadBatch(images);
+
+  Map<String, dynamic> getPreloadQueueStatus() => {
+    'queueLength': _preloadQueue.length,
+    'processingCount': _processingTaskIds.length,
+    'isProcessing': _isProcessingQueue,
+    'successCount': _preloadSuccessCount,
+    'errorCount': _preloadErrorCount,
+  };
+
   void _removeFromPreloadQueue(String taskId) {
     final initialLength = _preloadQueue.length;
     _preloadQueue.removeWhere((task) => task.taskId == taskId);
@@ -396,20 +382,17 @@ class ImageMetadataService {
     }
   }
 
-  /// 清空所有缓存
   Future<void> clearCache() async {
     _memoryCache.clear();
+    _pathToHashMap.clear();
+    _hashToPathsMap.clear();
     await _persistentBox?.clear();
     AppLogger.i('All caches cleared', 'ImageMetadataService');
   }
 
-  // ============================================================
-  // 内部实现
-  // ============================================================
-
-  /// 解析文件并缓存
   Future<NaiImageMetadata?> _parseAndCache(
     String path, {
+    required String hash,
     required bool forceFullParse,
   }) async {
     try {
@@ -419,26 +402,17 @@ class ImageMetadataService {
 
       NaiImageMetadata? metadata;
 
-      // 尝试快速解析
       if (!forceFullParse) {
         metadata = await _extractMetadataFast(file);
-        if (metadata != null) {
-          _fastParseCount++;
-        }
+        if (metadata != null) _fastParseCount++;
       }
 
-      // Fallback 到完整解析
-      if (metadata == null) {
-        metadata = await NaiMetadataParser.extractFromFile(file);
-        if (metadata != null) {
-          _fallbackParseCount++;
-        }
-      }
+      metadata ??= await NaiMetadataParser.extractFromFile(file);
+      if (metadata != null) _fallbackParseCount++;
 
-      // 存入两级缓存
       if (metadata != null && metadata.hasData) {
-        _memoryCache.put(path, metadata);
-        await _saveToPersistentCache(path, metadata);
+        _memoryCache.put(hash, metadata);
+        await _saveToPersistentCache(hash, metadata);
       }
 
       return metadata;
@@ -449,33 +423,26 @@ class ImageMetadataService {
     }
   }
 
-  /// 解析字节并缓存
   Future<NaiImageMetadata?> _parseBytesAndCache(
     Uint8List bytes, {
-    String? cacheKey,
+    required String hash,
   }) async {
     try {
       if (bytes.length < 8) return null;
 
       NaiImageMetadata? metadata;
 
-      // 尝试快速解析
       if (bytes.length <= _streamBufferSize) {
         metadata = _extractFromChunks(bytes);
       } else {
         metadata = _extractFromChunks(bytes.sublist(0, _streamBufferSize));
       }
 
-      // Fallback
       metadata ??= await NaiMetadataParser.extractFromBytes(bytes);
 
-      // 存入缓存
       if (metadata != null && metadata.hasData) {
-        final key = cacheKey ?? _computeBytesHash(bytes);
-        _memoryCache.put(key, metadata);
-        if (cacheKey != null) {
-          await _saveToPersistentCache(cacheKey, metadata);
-        }
+        _memoryCache.put(hash, metadata);
+        await _saveToPersistentCache(hash, metadata);
       }
 
       return metadata;
@@ -486,7 +453,6 @@ class ImageMetadataService {
     }
   }
 
-  /// 快速流式解析（只读前50KB）
   Future<NaiImageMetadata?> _extractMetadataFast(File file) async {
     final raf = await file.open();
     try {
@@ -504,7 +470,6 @@ class ImageMetadataService {
     }
   }
 
-  /// 从 chunks 提取元数据
   NaiImageMetadata? _extractFromChunks(Uint8List bytes) {
     final chunks = _extractChunks(bytes);
     for (final chunk in chunks) {
@@ -521,7 +486,6 @@ class ImageMetadataService {
     return null;
   }
 
-  /// 提取 PNG chunks
   List<_PngChunk> _extractChunks(Uint8List bytes) {
     final chunks = <_PngChunk>[];
     var offset = 8;
@@ -534,7 +498,7 @@ class ImageMetadataService {
       offset += 4;
       if (offset + length > bytes.length) break;
       final data = bytes.sublist(offset, offset + length);
-      offset += length + 4; // skip CRC
+      offset += length + 4;
       chunks.add(_PngChunk(name: name, data: data));
       if (name == 'IDAT') break;
     }
@@ -542,7 +506,6 @@ class ImageMetadataService {
     return chunks;
   }
 
-  /// 解析 text chunk
   String? _parseTextChunk(Uint8List data, String chunkType) {
     try {
       return switch (chunkType) {
@@ -626,20 +589,6 @@ class ImageMetadataService {
         bytes[offset + 3];
   }
 
-  String _computeBytesHash(Uint8List bytes) {
-    final sampleSize = bytes.length < 1024 ? bytes.length : 1024;
-    var hash = 0;
-    for (var i = 0; i < sampleSize; i++) {
-      hash = ((hash << 5) - hash) + bytes[i];
-      hash = hash & 0xFFFFFFFF;
-    }
-    return '${hash}_${bytes.length}';
-  }
-
-  // ============================================================
-  // 持久缓存操作
-  // ============================================================
-
   NaiImageMetadata? _getFromPersistentCache(String key) {
     try {
       final box = _getBox();
@@ -655,31 +604,17 @@ class ImageMetadataService {
   Future<void> _saveToPersistentCache(String key, NaiImageMetadata metadata) async {
     try {
       final box = _getBox();
-      // 清理旧数据（如果超过1000条）
       if (box.length >= 1000) {
         final keysToDelete = box.keys.take(100).toList();
         for (final k in keysToDelete) {
           await box.delete(k);
         }
       }
-      final jsonString = jsonEncode(metadata.toJson());
-      await box.put(key, jsonString);
+      await box.put(key, jsonEncode(metadata.toJson()));
     } catch (e) {
       AppLogger.w('Failed to save to persistent cache: $key', 'ImageMetadataService');
     }
   }
-
-  bool _isInPersistentCache(String key) {
-    try {
-      return _getBox().containsKey(key);
-    } catch (e) {
-      return false;
-    }
-  }
-
-  // ============================================================
-  // 预加载队列
-  // ============================================================
 
   Future<void> _processPreloadQueue() async {
     if (_isProcessingQueue) return;
@@ -708,25 +643,31 @@ class ImageMetadataService {
 
   Future<void> _processPreloadTask(_PreloadTask task) async {
     try {
-      // 检查是否已被前台请求处理中或已完成
-      if (_pendingFutures.containsKey(task.taskId)) {
-        AppLogger.d('Skipping preload, already being processed: ${task.taskId}', 'ImageMetadataService');
-        // 等待前台处理完成，共享结果
-        await _pendingFutures[task.taskId]!;
-        return;
-      }
-
-      // 检查是否已缓存
-      if (_memoryCache.get(task.taskId) != null) {
-        return;
-      }
-
       NaiImageMetadata? metadata;
       if (task.filePath != null) {
+        final hash = await _getFileHash(task.filePath!);
+
+        if (_pendingFutures.containsKey(hash)) {
+          await _pendingFutures[hash]!;
+          return;
+        }
+
+        if (_memoryCache.get(hash) != null) return;
+
         metadata = await getMetadata(task.filePath!);
       } else if (task.bytes != null) {
-        metadata = await getMetadataFromBytes(task.bytes!, cacheKey: task.taskId);
+        final hash = sha256.convert(task.bytes!).toString();
+
+        if (_pendingFutures.containsKey(hash)) {
+          await _pendingFutures[hash]!;
+          return;
+        }
+
+        if (_memoryCache.get(hash) != null) return;
+
+        metadata = await getMetadataFromBytes(task.bytes!);
       }
+
       if (metadata != null && metadata.hasData) {
         _preloadSuccessCount++;
       } else {
@@ -737,10 +678,6 @@ class ImageMetadataService {
     }
   }
 }
-
-// ============================================================
-// 辅助类
-// ============================================================
 
 class _PngChunk {
   final String name;

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../data/models/gallery/nai_image_metadata.dart';
@@ -9,31 +11,29 @@ import '../utils/lru_cache.dart';
 
 /// 元数据解析状态
 enum MetadataStatus {
-  success, // 解析成功
-  failed, // 解析失败
-  none, // 未解析
+  success,
+  failed,
+  none,
 }
 
 /// 画廊图片记录
-///
-/// 表示本地图片文件的基本信息和元数据
 class GalleryImageRecord {
-  final int? id; // 图片ID (SQLite自增主键)
-  final String filePath; // 文件路径
-  final String fileName; // 文件名称
-  final int fileSize; // 文件大小（字节）
-  final String? fileHash; // 文件哈希
-  final int? width; // 图片宽度
-  final int? height; // 图片高度
-  final double? aspectRatio; // 宽高比
-  final DateTime modifiedAt; // 最后修改时间
-  final DateTime createdAt; // 创建时间
-  final DateTime indexedAt; // 索引时间
-  final int dateYmd; // 日期YYYYMMDD格式
-  final String? resolutionKey; // 分辨率键
-  final MetadataStatus metadataStatus; // 元数据状态
-  final bool isFavorite; // 是否收藏
-  final bool isDeleted; // 是否已删除（软删除）
+  final int? id;
+  final String filePath;
+  final String fileName;
+  final int fileSize;
+  final String? fileHash;
+  final int? width;
+  final int? height;
+  final double? aspectRatio;
+  final DateTime modifiedAt;
+  final DateTime createdAt;
+  final DateTime indexedAt;
+  final int dateYmd;
+  final String? resolutionKey;
+  final MetadataStatus metadataStatus;
+  final bool isFavorite;
+  final bool isDeleted;
 
   const GalleryImageRecord({
     this.id,
@@ -143,33 +143,31 @@ class GalleryImageRecord {
 }
 
 /// 画廊元数据记录
-///
-/// 存储图片的 NAI 生成元数据
 class GalleryMetadataRecord {
-  final int imageId; // 关联的图片ID
-  final String prompt; // 正向提示词
-  final String negativePrompt; // 负向提示词
-  final int? seed; // 随机种子
-  final String? sampler; // 采样器
-  final int? steps; // 采样步数
-  final double? scale; // CFG Scale
-  final int? width; // 图片宽度
-  final int? height; // 图片高度
-  final String? model; // 模型名称
-  final bool smea; // SMEA 开关
-  final bool smeaDyn; // SMEA DYN 开关
-  final String? noiseSchedule; // 噪声计划
-  final double? cfgRescale; // CFG Rescale
-  final int? ucPreset; // UC 预设
-  final bool qualityToggle; // 质量标签开关
-  final bool isImg2Img; // 是否为 img2img
-  final double? strength; // img2img 强度
-  final double? noise; // img2img 噪声
-  final String? software; // 软件名称
-  final String? source; // 模型来源
-  final String? version; // 版本信息
-  final String? rawJson; // 原始 JSON 字符串
-  final String fullPromptText; // 用于 FTS5 搜索的完整提示词文本
+  final int imageId;
+  final String prompt;
+  final String negativePrompt;
+  final int? seed;
+  final String? sampler;
+  final int? steps;
+  final double? scale;
+  final int? width;
+  final int? height;
+  final String? model;
+  final bool smea;
+  final bool smeaDyn;
+  final String? noiseSchedule;
+  final double? cfgRescale;
+  final int? ucPreset;
+  final bool qualityToggle;
+  final bool isImg2Img;
+  final double? strength;
+  final double? noise;
+  final String? software;
+  final String? source;
+  final String? version;
+  final String? rawJson;
+  final String fullPromptText;
 
   const GalleryMetadataRecord({
     required this.imageId,
@@ -205,7 +203,7 @@ class GalleryMetadataRecord {
         'seed': seed,
         'sampler': sampler,
         'steps': steps,
-        'scale': scale,
+        'cfg_scale': scale,
         'width': width,
         'height': height,
         'model': model,
@@ -254,7 +252,6 @@ class GalleryMetadataRecord {
     );
   }
 
-  /// 从 NaiImageMetadata 构造
   factory GalleryMetadataRecord.fromNaiMetadata(
     int imageId,
     NaiImageMetadata metadata,
@@ -290,10 +287,10 @@ class GalleryMetadataRecord {
 
 /// 画廊标签记录
 class GalleryTagRecord {
-  final String id; // 标签ID
-  final String name; // 标签名称
-  final String? category; // 标签分类
-  final int usageCount; // 使用次数
+  final String id;
+  final String name;
+  final String? category;
+  final int usageCount;
 
   const GalleryTagRecord({
     required this.id,
@@ -321,16 +318,16 @@ class GalleryTagRecord {
 
 /// 扫描日志记录
 class ScanLogRecord {
-  final String id; // 日志ID
-  final DateTime startedAt; // 开始时间
-  final DateTime? completedAt; // 完成时间
-  final int totalFiles; // 总文件数
-  final int processedFiles; // 处理文件数
-  final int newFiles; // 新增文件数
-  final int updatedFiles; // 更新文件数
-  final int failedFiles; // 失败文件数
-  final String? errorMessage; // 错误信息
-  final String? scanPath; // 扫描路径
+  final String id;
+  final DateTime startedAt;
+  final DateTime? completedAt;
+  final int totalFiles;
+  final int processedFiles;
+  final int newFiles;
+  final int updatedFiles;
+  final int failedFiles;
+  final String? errorMessage;
+  final String? scanPath;
 
   const ScanLogRecord({
     required this.id,
@@ -382,19 +379,11 @@ class ScanLogRecord {
 
 /// 画廊数据源
 ///
-/// 管理本地图片画廊的数据存储和查询。
-/// 支持图片元数据、标签、收藏和全文搜索。
-///
-/// 使用 EnhancedBaseDataSource 提供的新特性：
-/// - ConnectionLease 连接生命周期管理
-/// - 自动重试机制
-/// - 超时控制
-/// - 流式查询支持
+/// 管理本地图片画廊的数据存储和查询，支持图片元数据、标签、收藏和全文搜索。
 class GalleryDataSource extends EnhancedBaseDataSource {
   static const int _maxImageCacheSize = 500;
   static const int _maxMetadataCacheSize = 200;
 
-  // 表名常量
   static const String _imagesTable = 'gallery_images';
   static const String _metadataTable = 'gallery_metadata';
   static const String _favoritesTable = 'gallery_favorites';
@@ -403,13 +392,10 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   static const String _scanLogsTable = 'gallery_scan_logs';
   static const String _ftsIndexTable = 'gallery_fts_index';
 
-  // 缓存
   final LRUCache<int, GalleryImageRecord> _imageCache =
       LRUCache(maxSize: _maxImageCacheSize);
   final LRUCache<int, GalleryMetadataRecord> _metadataCache =
       LRUCache(maxSize: _maxMetadataCacheSize);
-
-  // 收藏缓存
   final Set<int> _favoriteCache = <int>{};
   bool _favoritesLoaded = false;
 
@@ -420,9 +406,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   DataSourceType get type => DataSourceType.gallery;
 
   @override
-  Set<String> get dependencies => {}; // 无依赖
+  Set<String> get dependencies => {};
 
-  /// 清除缓存
   void clearCache() {
     _imageCache.clear();
     _metadataCache.clear();
@@ -431,7 +416,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     AppLogger.i('Gallery cache cleared', 'GalleryDS');
   }
 
-  /// 获取缓存统计信息
   Map<String, dynamic> getCacheStatistics() => {
         'imageCache': _imageCache.statistics,
         'metadataCache': _metadataCache.statistics,
@@ -440,188 +424,197 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   @override
   Future<void> doInitialize() async {
     return await execute('doInitialize', (db) async {
-      // 创建图片基础信息表（兼容旧数据库结构）
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS $_imagesTable (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          file_path TEXT NOT NULL UNIQUE,
-          file_name TEXT NOT NULL,
-          file_size INTEGER NOT NULL DEFAULT 0,
-          file_hash TEXT,
-          width INTEGER,
-          height INTEGER,
-          aspect_ratio REAL,
-          modified_at INTEGER NOT NULL,
-          created_at INTEGER NOT NULL,
-          indexed_at INTEGER NOT NULL,
-          date_ymd INTEGER NOT NULL DEFAULT 0,
-          resolution_key TEXT,
-          metadata_status INTEGER NOT NULL DEFAULT 2,
-          is_favorite INTEGER NOT NULL DEFAULT 0,
-          is_deleted INTEGER NOT NULL DEFAULT 0
-        )
-      ''');
-
-      // 创建图片表索引
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_images_modified_at
-        ON $_imagesTable(modified_at DESC)
-      ''');
-
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_images_created_at
-        ON $_imagesTable(created_at DESC)
-      ''');
-
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_images_favorite
-        ON $_imagesTable(is_favorite)
-      ''');
-
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_images_metadata_status
-        ON $_imagesTable(metadata_status)
-      ''');
-
-      // 创建元数据表
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS $_metadataTable (
-          image_id INTEGER PRIMARY KEY,
-          prompt TEXT NOT NULL DEFAULT '',
-          negative_prompt TEXT NOT NULL DEFAULT '',
-          seed INTEGER,
-          sampler TEXT,
-          steps INTEGER,
-          cfg_scale REAL,
-          width INTEGER,
-          height INTEGER,
-          model TEXT,
-          smea INTEGER NOT NULL DEFAULT 0,
-          smea_dyn INTEGER NOT NULL DEFAULT 0,
-          noise_schedule TEXT,
-          cfg_rescale REAL,
-          uc_preset INTEGER,
-          quality_toggle INTEGER NOT NULL DEFAULT 0,
-          is_img2img INTEGER NOT NULL DEFAULT 0,
-          strength REAL,
-          noise REAL,
-          software TEXT,
-          source TEXT,
-          version TEXT,
-          raw_json TEXT,
-          has_metadata INTEGER NOT NULL DEFAULT 0,
-          full_prompt_text TEXT NOT NULL DEFAULT '',
-          vibe_encoding TEXT,
-          vibe_strength REAL,
-          vibe_info_extracted REAL,
-          vibe_source_type TEXT,
-          has_vibe INTEGER NOT NULL DEFAULT 0,
-          FOREIGN KEY (image_id) REFERENCES $_imagesTable(id) ON DELETE CASCADE
-        )
-      ''');
-
-      // 创建元数据表索引
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_metadata_model
-        ON $_metadataTable(model)
-      ''');
-
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_metadata_sampler
-        ON $_metadataTable(sampler)
-      ''');
-
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_metadata_seed
-        ON $_metadataTable(seed)
-      ''');
-
-      // 创建收藏表
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS $_favoritesTable (
-          image_id INTEGER PRIMARY KEY,
-          favorited_at INTEGER NOT NULL,
-          FOREIGN KEY (image_id) REFERENCES $_imagesTable(id) ON DELETE CASCADE
-        )
-      ''');
-
-      // 创建标签表
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS $_tagsTable (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL UNIQUE,
-          category TEXT,
-          usage_count INTEGER NOT NULL DEFAULT 0
-        )
-      ''');
-
-      // 创建标签表索引
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_tags_name
-        ON $_tagsTable(name)
-      ''');
-
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_tags_category
-        ON $_tagsTable(category)
-      ''');
-
-      // 创建图片-标签关联表
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS $_imageTagsTable (
-          image_id INTEGER NOT NULL,
-          tag_id TEXT NOT NULL,
-          PRIMARY KEY (image_id, tag_id),
-          FOREIGN KEY (image_id) REFERENCES $_imagesTable(id) ON DELETE CASCADE,
-          FOREIGN KEY (tag_id) REFERENCES $_tagsTable(id) ON DELETE CASCADE
-        )
-      ''');
-
-      // 创建图片标签关联表索引
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_image_tags_tag_id
-        ON $_imageTagsTable(tag_id)
-      ''');
-
-      // 创建扫描日志表
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS $_scanLogsTable (
-          id TEXT PRIMARY KEY,
-          started_at INTEGER NOT NULL,
-          completed_at INTEGER,
-          total_files INTEGER NOT NULL DEFAULT 0,
-          processed_files INTEGER NOT NULL DEFAULT 0,
-          new_files INTEGER NOT NULL DEFAULT 0,
-          updated_files INTEGER NOT NULL DEFAULT 0,
-          failed_files INTEGER NOT NULL DEFAULT 0,
-          error_message TEXT,
-          scan_path TEXT
-        )
-      ''');
-
-      // 创建扫描日志表索引
-      await db.execute('''
-        CREATE INDEX IF NOT EXISTS idx_gallery_scan_logs_started_at
-        ON $_scanLogsTable(started_at DESC)
-      ''');
-
-      // 创建 FTS5 虚拟表用于全文搜索
-      await db.execute('''
-        CREATE VIRTUAL TABLE IF NOT EXISTS $_ftsIndexTable USING fts5(
-          image_id UNINDEXED,
-          prompt_text,
-          tokenize = 'porter'
-        )
-      ''');
+      await _createImagesTable(db);
+      await _createMetadataTable(db);
+      await _createFavoritesTable(db);
+      await _createTagsTable(db);
+      await _createImageTagsTable(db);
+      await _createScanLogsTable(db);
+      await _createFtsIndexTable(db);
 
       AppLogger.i('Gallery tables initialized', 'GalleryDS');
     });
   }
 
+  Future<void> _createImagesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_imagesTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL UNIQUE,
+        file_name TEXT NOT NULL,
+        file_size INTEGER NOT NULL DEFAULT 0,
+        file_hash TEXT,
+        width INTEGER,
+        height INTEGER,
+        aspect_ratio REAL,
+        modified_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        indexed_at INTEGER NOT NULL,
+        date_ymd INTEGER NOT NULL DEFAULT 0,
+        resolution_key TEXT,
+        metadata_status INTEGER NOT NULL DEFAULT 2,
+        is_favorite INTEGER NOT NULL DEFAULT 0,
+        is_deleted INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_images_modified_at
+      ON $_imagesTable(modified_at DESC)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_images_created_at
+      ON $_imagesTable(created_at DESC)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_images_favorite
+      ON $_imagesTable(is_favorite)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_images_metadata_status
+      ON $_imagesTable(metadata_status)
+    ''');
+  }
+
+  Future<void> _createMetadataTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_metadataTable (
+        image_id INTEGER PRIMARY KEY,
+        prompt TEXT NOT NULL DEFAULT '',
+        negative_prompt TEXT NOT NULL DEFAULT '',
+        seed INTEGER,
+        sampler TEXT,
+        steps INTEGER,
+        cfg_scale REAL,
+        width INTEGER,
+        height INTEGER,
+        model TEXT,
+        smea INTEGER NOT NULL DEFAULT 0,
+        smea_dyn INTEGER NOT NULL DEFAULT 0,
+        noise_schedule TEXT,
+        cfg_rescale REAL,
+        uc_preset INTEGER,
+        quality_toggle INTEGER NOT NULL DEFAULT 0,
+        is_img2img INTEGER NOT NULL DEFAULT 0,
+        strength REAL,
+        noise REAL,
+        software TEXT,
+        source TEXT,
+        version TEXT,
+        raw_json TEXT,
+        has_metadata INTEGER NOT NULL DEFAULT 0,
+        full_prompt_text TEXT NOT NULL DEFAULT '',
+        vibe_encoding TEXT,
+        vibe_strength REAL,
+        vibe_info_extracted REAL,
+        vibe_source_type TEXT,
+        has_vibe INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (image_id) REFERENCES $_imagesTable(id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_metadata_model
+      ON $_metadataTable(model)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_metadata_sampler
+      ON $_metadataTable(sampler)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_metadata_seed
+      ON $_metadataTable(seed)
+    ''');
+  }
+
+  Future<void> _createFavoritesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_favoritesTable (
+        image_id INTEGER PRIMARY KEY,
+        favorited_at INTEGER NOT NULL,
+        FOREIGN KEY (image_id) REFERENCES $_imagesTable(id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createTagsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_tagsTable (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        category TEXT,
+        usage_count INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_tags_name
+      ON $_tagsTable(name)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_tags_category
+      ON $_tagsTable(category)
+    ''');
+  }
+
+  Future<void> _createImageTagsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_imageTagsTable (
+        image_id INTEGER NOT NULL,
+        tag_id TEXT NOT NULL,
+        PRIMARY KEY (image_id, tag_id),
+        FOREIGN KEY (image_id) REFERENCES $_imagesTable(id) ON DELETE CASCADE,
+        FOREIGN KEY (tag_id) REFERENCES $_tagsTable(id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_image_tags_tag_id
+      ON $_imageTagsTable(tag_id)
+    ''');
+  }
+
+  Future<void> _createScanLogsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_scanLogsTable (
+        id TEXT PRIMARY KEY,
+        started_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        total_files INTEGER NOT NULL DEFAULT 0,
+        processed_files INTEGER NOT NULL DEFAULT 0,
+        new_files INTEGER NOT NULL DEFAULT 0,
+        updated_files INTEGER NOT NULL DEFAULT 0,
+        failed_files INTEGER NOT NULL DEFAULT 0,
+        error_message TEXT,
+        scan_path TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_gallery_scan_logs_started_at
+      ON $_scanLogsTable(started_at DESC)
+    ''');
+  }
+
+  Future<void> _createFtsIndexTable(Database db) async {
+    await db.execute('''
+      CREATE VIRTUAL TABLE IF NOT EXISTS $_ftsIndexTable USING fts5(
+        image_id UNINDEXED,
+        prompt_text,
+        tokenize = 'porter'
+      )
+    ''');
+  }
+
   @override
   Future<DataSourceHealth> doCheckHealth() async {
     return await execute('doCheckHealth', (db) async {
-      // 检查所有表是否存在
       final tables = [
         _imagesTable,
         _metadataTable,
@@ -653,12 +646,10 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         );
       }
 
-      // 尝试查询每个表
       for (final table in tables) {
         await db.rawQuery('SELECT 1 FROM $table LIMIT 1');
       }
 
-      // 获取统计信息
       final imageCount = await _getTableCount(db, _imagesTable);
       final metadataCount = await _getTableCount(db, _metadataTable);
       final tagCount = await _getTableCount(db, _tagsTable);
@@ -682,7 +673,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     });
   }
 
-  /// 获取表记录数
   Future<int> _getTableCount(dynamic db, String tableName) async {
     try {
       final result = await db.rawQuery(
@@ -710,15 +700,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   // 图片记录 CRUD 操作
   // ============================================================
 
-  /// 插入或更新图片记录
-  ///
-  /// 使用 INSERT OR REPLACE 语义，如果存在相同 file_path 的记录则更新
-  /// 返回插入/更新后的图片ID
-  ///
-  /// 使用新的 BaseDataSource.execute 模式，提供：
-  /// - 连接生命周期自动管理
-  /// - 自动重试机制
-  /// - 超时控制
   Future<int> upsertImage({
     required String filePath,
     required String fileName,
@@ -739,7 +720,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         final dateYmd = _formatDateYmd(modifiedAt);
         final now = DateTime.now();
 
-        // 首先尝试获取现有记录的ID（如果存在）
         final existingResult = await db.rawQuery(
           'SELECT id FROM $_imagesTable WHERE file_path = ?',
           [filePath],
@@ -748,7 +728,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
             ? (existingResult.first['id'] as num?)?.toInt()
             : null;
 
-        // 如果存在，清除缓存
         if (existingId != null) {
           _imageCache.remove(existingId);
         }
@@ -789,9 +768,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     );
   }
 
-  /// 根据文件路径获取图片ID
-  ///
-  /// 如果找不到记录，返回 null
   Future<int?> getImageIdByPath(String filePath) async {
     try {
       return await execute(
@@ -819,21 +795,107 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     }
   }
 
-  /// 根据文件路径列表批量获取图片ID
-  ///
-  /// [filePaths] 文件路径列表
-  ///
-  /// 返回一个 Map，键为文件路径，值为对应的图片ID（如果找不到则为 null）
-  /// 使用单个查询批量获取，比多次调用 getImageIdByPath 更高效
-  ///
-  /// 注意：SQLite 有 999 个参数限制，使用分批处理避免超出限制
+  Future<int?> getImageIdByHash(String fileHash) async {
+    if (fileHash.isEmpty) return null;
+
+    try {
+      return await execute(
+        'getImageIdByHash',
+        (db) async {
+          final result = await db.rawQuery(
+            'SELECT id FROM $_imagesTable WHERE file_hash = ? AND is_deleted = 0 LIMIT 1',
+            [fileHash],
+          );
+
+          if (result.isEmpty) return null;
+          return (result.first['id'] as num?)?.toInt();
+        },
+        timeout: const Duration(seconds: 10),
+        maxRetries: 3,
+      );
+    } catch (e, stack) {
+      AppLogger.e(
+        'Failed to get image ID by hash: $fileHash',
+        e,
+        stack,
+        'GalleryDS',
+      );
+      return null;
+    }
+  }
+
+  Future<String?> getFileHashByPath(String filePath) async {
+    try {
+      return await execute(
+        'getFileHashByPath',
+        (db) async {
+          final result = await db.rawQuery(
+            'SELECT file_hash FROM $_imagesTable WHERE file_path = ? AND is_deleted = 0',
+            [filePath],
+          );
+
+          if (result.isEmpty) return null;
+          return result.first['file_hash'] as String?;
+        },
+        timeout: const Duration(seconds: 10),
+        maxRetries: 3,
+      );
+    } catch (e, stack) {
+      AppLogger.e(
+        'Failed to get file hash by path: $filePath',
+        e,
+        stack,
+        'GalleryDS',
+      );
+      return null;
+    }
+  }
+
+  Future<void> updateFilePath(
+    int imageId,
+    String newPath, {
+    String? newFileName,
+  }) async {
+    try {
+      await execute(
+        'updateFilePath',
+        (db) async {
+          final fileName = newFileName ?? newPath.split(Platform.pathSeparator).last;
+
+          await db.update(
+            _imagesTable,
+            {
+              'file_path': newPath,
+              'file_name': fileName,
+              'indexed_at': DateTime.now().millisecondsSinceEpoch,
+            },
+            where: 'id = ?',
+            whereArgs: [imageId],
+          );
+
+          _imageCache.remove(imageId);
+        },
+        timeout: const Duration(seconds: 10),
+        maxRetries: 3,
+      );
+
+      AppLogger.d('Updated file path for image $imageId: $newPath', 'GalleryDS');
+    } catch (e, stack) {
+      AppLogger.e(
+        'Failed to update file path for image $imageId: $newPath',
+        e,
+        stack,
+        'GalleryDS',
+      );
+      rethrow;
+    }
+  }
+
   Future<Map<String, int?>> getImageIdsByPaths(List<String> filePaths) async {
     if (filePaths.isEmpty) return {};
 
     try {
       final result = <String, int?>{};
-
-      // SQLite 有 999 个参数限制，每批使用 900 个参数以确保安全
       const batchSize = 900;
       final chunks = chunk(filePaths, batchSize);
 
@@ -841,7 +903,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         await execute(
           'getImageIdsByPaths',
           (db) async {
-            // 构建 IN 子句的占位符
             final placeholders = List.filled(chunk.length, '?').join(',');
 
             final dbResult = await db.rawQuery(
@@ -852,7 +913,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
               chunk,
             );
 
-            // 构建结果映射
             for (final row in dbResult) {
               final path = row['file_path'] as String?;
               if (path == null) continue;
@@ -865,7 +925,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         );
       }
 
-      // 为未找到的路径填充 null
       for (final path in filePaths) {
         result.putIfAbsent(path, () => null);
       }
@@ -882,16 +941,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     }
   }
 
-  /// 根据ID获取图片记录
-  ///
-  /// 使用 LRU 缓存，优先从缓存获取
-  ///
-  /// 使用新的 BaseDataSource.execute 模式，提供：
-  /// - 连接生命周期自动管理
-  /// - 自动重试机制
-  /// - 异常处理和日志记录
   Future<GalleryImageRecord?> getImageById(int id) async {
-    // 先从缓存获取
     final cached = _imageCache.get(id);
     if (cached != null) {
       return cached;
@@ -912,8 +962,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           if (result.isEmpty) return null;
 
           final record = GalleryImageRecord.fromMap(result.first);
-
-          // 存入缓存
           _imageCache.put(id, record);
 
           return record;
@@ -927,16 +975,12 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     }
   }
 
-  /// 根据ID列表批量获取图片记录
-  ///
-  /// 优先从缓存获取，缺失的从数据库查询
   Future<List<GalleryImageRecord>> getImagesByIds(List<int> ids) async {
     if (ids.isEmpty) return [];
 
     final results = <GalleryImageRecord>[];
     final missingIds = <int>[];
 
-    // 先从缓存获取
     for (final id in ids) {
       final cached = _imageCache.get(id);
       if (cached != null) {
@@ -946,11 +990,9 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       }
     }
 
-    // 从数据库查询缺失的记录
     if (missingIds.isNotEmpty) {
       await execute('getImagesByIds', (db) async {
         try {
-          // 构建 IN 子句的占位符
           final placeholders = List.filled(missingIds.length, '?').join(',');
 
           final dbResults = await db.rawQuery(
@@ -965,7 +1007,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
             final record = GalleryImageRecord.fromMap(row);
             results.add(record);
 
-            // 存入缓存
             if (record.id != null) {
               _imageCache.put(record.id!, record);
             }
@@ -976,7 +1017,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       });
     }
 
-    // 按照原始ID顺序排序结果
     final idIndexMap = {for (var i = 0; i < ids.length; i++) ids[i]: i};
     results.sort((a, b) {
       final indexA = idIndexMap[a.id] ?? 0;
@@ -987,10 +1027,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     return results;
   }
 
-  /// 获取所有文件路径和哈希映射
-  ///
-  /// 用于增量扫描，只返回未删除的记录。
-  /// 使用流式查询处理大数据集，避免内存溢出。
   Future<Map<String, String?>> getAllFileHashes() async {
     try {
       final result = <String, String?>{};
@@ -1010,12 +1046,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     }
   }
 
-  /// 分页查询图片记录
-  ///
-  /// [limit] 每页数量
-  /// [offset] 偏移量
-  /// [orderBy] 排序字段，可选值: 'modified_at', 'created_at', 'indexed_at', 'file_name'
-  /// [descending] 是否降序
   Future<List<GalleryImageRecord>> queryImages({
     int limit = 50,
     int offset = 0,
@@ -1024,7 +1054,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   }) async {
     return await execute('queryImages', (db) async {
       try {
-        // 验证排序字段，防止SQL注入
         final validColumns = {
           'modified_at',
           'created_at',
@@ -1055,13 +1084,9 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     });
   }
 
-  /// 标记图片为已删除（软删除）
-  ///
-  /// [filePath] 文件路径
   Future<void> markAsDeleted(String filePath) async {
     await execute('markAsDeleted', (db) async {
       try {
-        // 先获取ID以清除缓存
         final result = await db.rawQuery(
           'SELECT id FROM $_imagesTable WHERE file_path = ?',
           [filePath],
@@ -1094,13 +1119,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     });
   }
 
-  /// 批量插入或更新图片记录
-  ///
-  /// [records] 图片记录列表
-  /// [batchSize] 每批处理数量（默认50，建议50-100）
-  ///
-  /// 使用事务批量处理，每批使用 executeTransaction 保证原子性。
-  /// 返回插入/更新后的图片ID列表，顺序与输入列表一致。
   Future<List<int>> batchUpsertImages(
     List<GalleryImageRecord> records, {
     int batchSize = 50,
@@ -1110,7 +1128,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     final results = <int>[];
     final now = DateTime.now();
 
-    // 分批处理
     for (var i = 0; i < records.length; i += batchSize) {
       final end = (i + batchSize < records.length) ? i + batchSize : records.length;
       final batch = records.sublist(i, end);
@@ -1124,7 +1141,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           for (final record in batch) {
             final dateYmd = _formatDateYmd(record.modifiedAt);
 
-            // 首先尝试获取现有记录的ID（如果存在）
             final existingResult = await txn.rawQuery(
               'SELECT id FROM $_imagesTable WHERE file_path = ?',
               [record.filePath],
@@ -1133,7 +1149,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
                 ? (existingResult.first['id'] as num?)?.toInt()
                 : null;
 
-            // 如果存在，清除缓存
             if (existingId != null) {
               _imageCache.remove(existingId);
             }
@@ -1176,7 +1191,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
 
       results.addAll(batchResults);
 
-      // 批次间让出时间片，避免阻塞主线程
       if (end < records.length) {
         await Future.delayed(const Duration(milliseconds: 10));
       }
@@ -1190,9 +1204,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     return results;
   }
 
-  /// 批量标记图片为已删除（软删除）
-  ///
-  /// 使用事务批量处理
   Future<void> batchMarkAsDeleted(List<String> filePaths) async {
     if (filePaths.isEmpty) return;
 
@@ -1213,8 +1224,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           await batch.commit(noResult: true);
         });
 
-        // 清除相关缓存
-        // 使用 getImageIdsByPaths 批量获取 ID，避免对每个文件路径执行额外查询
         final pathToIdMap = await getImageIdsByPaths(filePaths);
         for (final entry in pathToIdMap.entries) {
           final id = entry.value;
@@ -1234,9 +1243,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     });
   }
 
-  /// 统计图片数量
-  ///
-  /// [includeDeleted] 是否包含已删除的图片
   Future<int> countImages({bool includeDeleted = false}) async {
     return await execute('countImages', (db) async {
       try {
@@ -1254,7 +1260,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     });
   }
 
-  /// 格式化日期为YYYYMMDD整数
   int _formatDateYmd(DateTime date) {
     return date.year * 10000 + date.month * 100 + date.day;
   }
@@ -1269,13 +1274,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   // 元数据操作
   // ============================================================
 
-  /// 插入或更新元数据
-  ///
-  /// [imageId] 图片ID
-  /// [metadata] NAI 图片元数据
-  ///
-  /// 使用 INSERT OR REPLACE 语义，如果存在则更新。
-  /// 插入后清除元数据缓存并更新 FTS5 索引。
   Future<void> upsertMetadata(int imageId, NaiImageMetadata metadata) async {
     try {
       final fullPromptText = _buildFullPromptText(metadata);
@@ -1319,10 +1317,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         maxRetries: 3,
       );
 
-      // 清除该图片的元数据缓存
       _metadataCache.remove(imageId);
-
-      // 更新 FTS5 索引
       await _updateFtsIndex(imageId, fullPromptText);
 
       AppLogger.d('Upserted metadata for image: $imageId', 'GalleryDS');
@@ -1332,9 +1327,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     }
   }
 
-  /// 构建完整提示词文本（用于 FTS5 搜索）
-  ///
-  /// 合并 prompt, negativePrompt, characterPrompts
   String _buildFullPromptText(NaiImageMetadata metadata) {
     final buffer = StringBuffer();
     buffer.write(metadata.prompt);
@@ -1351,20 +1343,17 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     return buffer.toString();
   }
 
-  /// 更新 FTS5 索引
   Future<void> _updateFtsIndex(int imageId, String promptText) async {
     await execute(
       '_updateFtsIndex',
       (db) async {
         try {
-          // 先删除旧索引
           await db.delete(
             _ftsIndexTable,
             where: 'image_id = ?',
             whereArgs: [imageId],
           );
 
-          // 插入新索引
           await db.insert(_ftsIndexTable, {
             'image_id': imageId,
             'prompt_text': promptText,
@@ -1374,7 +1363,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
             'Failed to update FTS index for image $imageId: $e',
             'GalleryDS',
           );
-          // FTS 更新失败不应影响主流程
         }
       },
       timeout: const Duration(seconds: 5),
@@ -1382,21 +1370,12 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     );
   }
 
-  /// 批量插入或更新元数据
-  ///
-  /// [metadataList] 元数据映射列表 (imageId -> metadata)
-  /// [batchSize] 每批处理数量（默认50，建议50-100）
-  ///
-  /// 使用事务批量处理，每批使用 executeTransaction 保证原子性。
-  /// 批量更新 FTS5 索引，在批次内统一处理以提高效率。
-  /// 清除受影响图片的元数据缓存。
   Future<void> batchUpsertMetadata(
     List<MapEntry<int, NaiImageMetadata>> metadataList, {
     int batchSize = 50,
   }) async {
     if (metadataList.isEmpty) return;
 
-    // 分批处理
     for (var i = 0; i < metadataList.length; i += batchSize) {
       final end = (i + batchSize < metadataList.length)
           ? i + batchSize
@@ -1414,7 +1393,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
             final metadata = entry.value;
             final fullPromptText = _buildFullPromptText(metadata);
 
-            // 插入或更新元数据
             await txn.insert(
               _metadataTable,
               {
@@ -1447,20 +1425,15 @@ class GalleryDataSource extends EnhancedBaseDataSource {
               conflictAlgorithm: ConflictAlgorithm.replace,
             );
 
-            // 收集 FTS 更新
             ftsUpdates[imageId] = fullPromptText;
-
-            // 清除该图片的元数据缓存
             _metadataCache.remove(imageId);
           }
 
-          // 批量更新 FTS5 索引
           await _batchUpdateFtsIndex(txn, ftsUpdates);
         },
         timeout: const Duration(seconds: 60),
       );
 
-      // 批次间让出时间片，避免阻塞主线程
       if (end < metadataList.length) {
         await Future.delayed(const Duration(milliseconds: 10));
       }
@@ -1472,10 +1445,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     );
   }
 
-  /// 批量更新 FTS5 索引（事务内）
-  ///
-  /// [txn] 事务对象
-  /// [updates] 更新映射 (imageId -> promptText)
   Future<void> _batchUpdateFtsIndex(
     Transaction txn,
     Map<int, String> updates,
@@ -1483,14 +1452,12 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     if (updates.isEmpty) return;
 
     try {
-      // 批量删除旧索引
       final placeholders = List.filled(updates.length, '?').join(',');
       await txn.rawDelete(
         'DELETE FROM $_ftsIndexTable WHERE image_id IN ($placeholders)',
         updates.keys.toList(),
       );
 
-      // 批量插入新索引
       final batch = txn.batch();
       for (final entry in updates.entries) {
         batch.insert(_ftsIndexTable, {
@@ -1501,20 +1468,10 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       await batch.commit(noResult: true);
     } catch (e) {
       AppLogger.w('Failed to batch update FTS index: $e', 'GalleryDS');
-      // FTS 更新失败不应影响主流程
     }
   }
 
-  /// 根据图片ID获取元数据
-  ///
-  /// 先检查 _metadataCache，数据库查询后写入缓存
-  ///
-  /// 使用新的 BaseDataSource.execute 模式，提供：
-  /// - 连接生命周期自动管理
-  /// - 自动重试机制
-  /// - 异常处理和日志记录
   Future<GalleryMetadataRecord?> getMetadataByImageId(int imageId) async {
-    // 先检查缓存
     final cached = _metadataCache.get(imageId);
     if (cached != null) {
       return cached;
@@ -1535,8 +1492,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           if (result.isEmpty) return null;
 
           final record = GalleryMetadataRecord.fromMap(result.first);
-
-          // 写入缓存
           _metadataCache.put(imageId, record);
 
           return record;
@@ -1555,13 +1510,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     }
   }
 
-  /// 根据图片ID列表批量获取元数据
-  ///
-  /// [imageIds] 图片ID列表
-  ///
-  /// 返回一个 Map，键为图片ID，值为对应的元数据记录（如果找不到则为 null）
-  /// 优先从缓存获取，缺失的从数据库查询
-  /// 使用单个查询批量获取，比多次调用 getMetadataByImageId 更高效
   Future<Map<int, GalleryMetadataRecord?>> getMetadataByImageIds(
     List<int> imageIds,
   ) async {
@@ -1570,7 +1518,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     final results = <int, GalleryMetadataRecord?>{};
     final missingIds = <int>[];
 
-    // 先从缓存获取
     for (final id in imageIds) {
       final cached = _metadataCache.get(id);
       if (cached != null) {
@@ -1580,10 +1527,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       }
     }
 
-    // 从数据库查询缺失的记录
     if (missingIds.isNotEmpty) {
       try {
-        // SQLite 有 999 个参数限制，每批使用 900 个参数以确保安全
         const batchSize = 900;
         final chunks = chunk(missingIds, batchSize);
 
@@ -1591,7 +1536,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           await execute(
             'getMetadataByImageIds',
             (db) async {
-              // 构建 IN 子句的占位符
               final placeholders = List.filled(chunk.length, '?').join(',');
 
               final dbResults = await db.rawQuery(
@@ -1602,19 +1546,15 @@ class GalleryDataSource extends EnhancedBaseDataSource {
                 chunk,
               );
 
-              // 先为所有缺失的ID设置 null
               for (final id in chunk) {
                 results[id] = null;
               }
 
-              // 填充查询到的记录
               for (final row in dbResults) {
                 final record = GalleryMetadataRecord.fromMap(row);
                 final id = record.imageId;
 
                 results[id] = record;
-
-                // 存入缓存
                 _metadataCache.put(id, record);
               }
             },
@@ -1629,7 +1569,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           stack,
           'GalleryDS',
         );
-        // 发生错误时，为缺失的ID返回 null
         for (final id in missingIds) {
           results.putIfAbsent(id, () => null);
         }
@@ -1643,17 +1582,10 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   // 收藏操作
   // ============================================================
 
-  /// 切换收藏状态
-  ///
-  /// [imageId] 图片ID
-  ///
-  /// 如果存在则删除，不存在则插入。
-  /// 更新 _favoriteCache，返回新的收藏状态（true=已收藏，false=未收藏）
   Future<bool> toggleFavorite(int imageId) async {
     return await execute(
       'toggleFavorite',
       (db) async {
-        // 检查是否已收藏
         final exists = await db.rawQuery(
           'SELECT 1 FROM $_favoritesTable WHERE image_id = ?',
           [imageId],
@@ -1662,7 +1594,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         final isCurrentlyFavorite = exists.isNotEmpty;
 
         if (isCurrentlyFavorite) {
-          // 取消收藏
           await db.delete(
             _favoritesTable,
             where: 'image_id = ?',
@@ -1672,7 +1603,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           AppLogger.d('Removed favorite: $imageId', 'GalleryDS');
           return false;
         } else {
-          // 添加收藏
           await db.insert(_favoritesTable, {
             'image_id': imageId,
             'favorited_at': DateTime.now().millisecondsSinceEpoch,
@@ -1687,18 +1617,11 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     );
   }
 
-  /// 检查是否已收藏
-  ///
-  /// [imageId] 图片ID
-  ///
-  /// 优先使用 _favoriteCache，如果缓存未加载则查询数据库
   Future<bool> isFavorite(int imageId) async {
-    // 优先使用缓存
     if (_favoritesLoaded) {
       return _favoriteCache.contains(imageId);
     }
 
-    // 缓存未加载，查询数据库
     return await execute(
       'isFavorite',
       (db) async {
@@ -1713,9 +1636,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     );
   }
 
-  /// 加载所有收藏到缓存
-  ///
-  /// 一次性加载所有收藏ID到 _favoriteCache，设置 _favoritesLoaded = true
   Future<void> loadFavoritesCache() async {
     if (_favoritesLoaded) return;
 
@@ -1745,11 +1665,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     );
   }
 
-  /// 获取收藏数量
-  ///
-  /// 如果缓存已加载，直接返回缓存大小；否则查询数据库
   Future<int> getFavoriteCount() async {
-    // 如果缓存已加载，直接返回
     if (_favoritesLoaded) {
       return _favoriteCache.length;
     }
@@ -1767,20 +1683,11 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     );
   }
 
-  /// 获取所有收藏的图片ID
-  ///
-  /// 先调用 loadFavoritesCache 确保缓存已加载
   Future<List<int>> getFavoriteImageIds() async {
     await loadFavoritesCache();
     return _favoriteCache.toList();
   }
 
-  /// 批量查询图片的收藏状态
-  ///
-  /// [imageIds] 图片ID列表
-  ///
-  /// 返回一个 Map，键为图片ID，值为收藏状态（true=已收藏，false=未收藏）
-  /// 使用单个查询批量获取，比多次调用 isFavorite 更高效
   Future<Map<int, bool>> getFavoritesByImageIds(List<int> imageIds) async {
     if (imageIds.isEmpty) return {};
 
@@ -1789,7 +1696,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         for (final id in imageIds) id: false,
       };
 
-      // SQLite 有 999 个参数限制，每批使用 900 个参数以确保安全
       const batchSize = 900;
       final chunks = chunk(imageIds, batchSize);
 
@@ -1797,7 +1703,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         await execute(
           'getFavoritesByImageIds',
           (db) async {
-            // 构建 IN 子句的占位符
             final placeholders = List.filled(chunk.length, '?').join(',');
 
             final result = await db.rawQuery(
@@ -1808,7 +1713,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
               chunk,
             );
 
-            // 标记已收藏的图片
             for (final row in result) {
               final id = (row['image_id'] as num?)?.toInt();
               if (id != null) {
@@ -1829,7 +1733,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         stack,
         'GalleryDS',
       );
-      // 发生错误时，返回所有图片为未收藏状态
       return {for (final id in imageIds) id: false};
     }
   }
@@ -1838,24 +1741,11 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   // FTS5 全文搜索
   // ============================================================
 
-  /// FTS5 全文搜索
-  ///
-  /// [query] 搜索关键词
-  /// [limit] 返回结果数量限制，默认100
-  ///
-  /// 处理搜索词，添加通配符支持，查询 gallery_fts_index 表
-  /// 返回匹配的 image_id 列表
   Future<List<int>> searchFullText(String query, {int limit = 100}) async {
     if (query.trim().isEmpty) return [];
 
     try {
-      // 处理搜索词，添加通配符支持
-      // 转义 FTS5 特殊字符（双引号）以防止查询注入
-      String escapeFts5(String input) {
-        // 移除或转义 FTS5 特殊字符
-        // 双引号用于标识列名，需要转义
-        return input.replaceAll('"', '""');
-      }
+      String escapeFts5(String input) => input.replaceAll('"', '""');
 
       final searchQuery = query
           .split(RegExp(r'\s+'))
@@ -1889,16 +1779,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     }
   }
 
-  /// 高级搜索（组合条件）
-  ///
-  /// [textQuery] 文本搜索关键词（可选）
-  /// [dateStart] 日期范围开始（可选）
-  /// [dateEnd] 日期范围结束（可选）
-  /// [favoritesOnly] 仅搜索收藏的图片（可选）
-  /// [limit] 返回结果数量限制，默认100
-  ///
-  /// 如果有 textQuery，使用 FTS5 虚拟表进行文本搜索
-  /// 否则使用普通 JOIN 查询
   Future<List<int>> advancedSearch({
     String? textQuery,
     DateTime? dateStart,
@@ -1907,7 +1787,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     int limit = 100,
   }) async {
     return await execute('advancedSearch', (db) async {
-      // 如果有文本查询，先使用 FTS5 搜索
       List<int>? textSearchIds;
       if (textQuery != null && textQuery.trim().isNotEmpty) {
         textSearchIds = await searchFullText(textQuery, limit: limit * 2);
@@ -1916,16 +1795,13 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         }
       }
 
-      // 构建查询条件
       final conditions = <String>['i.is_deleted = 0'];
       final args = <dynamic>[];
 
-      // 收藏过滤
       if (favoritesOnly) {
         conditions.add('f.image_id IS NOT NULL');
       }
 
-      // 日期范围过滤
       if (dateStart != null) {
         conditions.add('i.modified_at >= ?');
         args.add(dateStart.millisecondsSinceEpoch);
@@ -1935,7 +1811,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         args.add(dateEnd.millisecondsSinceEpoch);
       }
 
-      // 如果有文本搜索结果，添加 ID 过滤
       if (textSearchIds != null && textSearchIds.isNotEmpty) {
         final placeholders = List.filled(textSearchIds.length, '?').join(',');
         conditions.add('i.id IN ($placeholders)');
@@ -1963,12 +1838,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   // 标签操作
   // ============================================================
 
-  /// 添加标签到图片
-  ///
-  /// [imageId] 图片ID
-  /// [tagName] 标签名称
-  ///
-  /// 使用事务，插入或获取标签（INSERT OR IGNORE），然后创建图片-标签关联
   Future<void> addTag(int imageId, String tagName) async {
     if (tagName.trim().isEmpty) return;
 
@@ -1977,7 +1846,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
 
     return await execute('addTag', (db) async {
       await db.transaction((txn) async {
-        // 插入或忽略标签
         await txn.insert(
           _tagsTable,
           {
@@ -1988,7 +1856,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           conflictAlgorithm: ConflictAlgorithm.ignore,
         );
 
-        // 创建图片-标签关联
         await txn.insert(
           _imageTagsTable,
           {
@@ -1998,7 +1865,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           conflictAlgorithm: ConflictAlgorithm.ignore,
         );
 
-        // 更新标签使用次数
         await txn.rawUpdate(
           '''
           UPDATE $_tagsTable
@@ -2015,12 +1881,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     });
   }
 
-  /// 从图片移除标签
-  ///
-  /// [imageId] 图片ID
-  /// [tagName] 标签名称
-  ///
-  /// 使用事务，删除图片-标签关联
   Future<void> removeTag(int imageId, String tagName) async {
     if (tagName.trim().isEmpty) return;
 
@@ -2029,14 +1889,12 @@ class GalleryDataSource extends EnhancedBaseDataSource {
 
     return await execute('removeTag', (db) async {
       await db.transaction((txn) async {
-        // 删除图片-标签关联
         await txn.delete(
           _imageTagsTable,
           where: 'image_id = ? AND tag_id = ?',
           whereArgs: [imageId, tagId],
         );
 
-        // 更新标签使用次数
         await txn.rawUpdate(
           '''
           UPDATE $_tagsTable
@@ -2047,9 +1905,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           ''',
           [tagId, tagId],
         );
-
-        // 如果标签不再被使用，可以选择删除标签（可选）
-        // 这里保留标签，只是 usage_count 变为 0
       });
 
       AppLogger.d(
@@ -2059,11 +1914,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     });
   }
 
-  /// 获取图片的所有标签
-  ///
-  /// [imageId] 图片ID
-  ///
-  /// 查询 tags 和 image_tags 表，返回标签名称列表
   Future<List<String>> getImageTags(int imageId) async {
     return await execute('getImageTags', (db) async {
       final results = await db.rawQuery(
@@ -2081,12 +1931,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     });
   }
 
-  /// 批量获取多个图片的标签
-  ///
-  /// [imageIds] 图片ID列表
-  ///
-  /// 返回一个 Map，键为图片ID，值为该图片的标签名称列表
-  /// 使用单个查询批量获取，比多次调用 getImageTags 更高效
   Future<Map<int, List<String>>> getTagsByImageIds(List<int> imageIds) async {
     if (imageIds.isEmpty) return {};
 
@@ -2095,7 +1939,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         for (final id in imageIds) id: const <String>[],
       };
 
-      // SQLite 有 999 个参数限制，每批使用 900 个参数以确保安全
       const batchSize = 900;
       final chunks = chunk(imageIds, batchSize);
 
@@ -2103,7 +1946,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         await execute(
           'getTagsByImageIds',
           (db) async {
-            // 构建 IN 子句的占位符
             final placeholders = List.filled(chunk.length, '?').join(',');
 
             final results = await db.rawQuery(
@@ -2117,7 +1959,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
               chunk,
             );
 
-            // 填充每个图片的标签
             for (final row in results) {
               final id = (row['image_id'] as num?)?.toInt();
               final tagName = row['name'] as String?;
@@ -2139,25 +1980,16 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         stack,
         'GalleryDS',
       );
-      // 发生错误时，返回所有图片为空标签列表
       return {for (final id in imageIds) id: <String>[]};
     }
   }
 
-  /// 设置图片标签（完全替换）
-  ///
-  /// [imageId] 图片ID
-  /// [tags] 标签名称列表
-  ///
-  /// 使用事务，先删除现有标签关联，然后批量插入新标签
-  /// 每个标签：插入标签表（如不存在），获取ID，创建关联
   Future<void> setImageTags(int imageId, List<String> tags) async {
     final normalizedTags =
         tags.map((t) => t.trim()).where((t) => t.isNotEmpty).toSet().toList();
 
     return await execute('setImageTags', (db) async {
       await db.transaction((txn) async {
-        // 获取当前标签，用于后续更新 usage_count
         final currentTagsResult = await txn.rawQuery(
           '''
           SELECT t.id
@@ -2170,18 +2002,15 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         final oldTagIds =
             currentTagsResult.map((row) => row['id'] as String).toSet();
 
-        // 删除该图片的所有标签关联
         await txn.delete(
           _imageTagsTable,
           where: 'image_id = ?',
           whereArgs: [imageId],
         );
 
-        // 批量插入新标签
         for (final tagName in normalizedTags) {
           final tagId = _generateTagId(tagName);
 
-          // 插入或忽略标签
           await txn.insert(
             _tagsTable,
             {
@@ -2192,7 +2021,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
             conflictAlgorithm: ConflictAlgorithm.ignore,
           );
 
-          // 创建图片-标签关联
           await txn.insert(
             _imageTagsTable,
             {
@@ -2203,7 +2031,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           );
         }
 
-        // 更新所有受影响标签的 usage_count
         final allTagIds = <String>{...oldTagIds};
         for (final tagName in normalizedTags) {
           allTagIds.add(_generateTagId(tagName));
@@ -2230,9 +2057,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     });
   }
 
-  /// 生成标签ID
-  ///
-  /// 使用标签名称的小写形式作为ID，确保一致性
   String _generateTagId(String tagName) {
     return tagName.toLowerCase().trim();
   }
@@ -2241,9 +2065,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   // 统计查询
   // ============================================================
 
-  /// 获取所有图片（不限制数量）
-  ///
-  /// 用于扫描服务获取所有已索引的图片
   Future<List<GalleryImageRecord>> getAllImages() async {
     try {
       return await execute(
@@ -2268,9 +2089,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     }
   }
 
-  /// 获取模型分布统计
-  ///
-  /// 返回每个模型的使用次数和占比
   Future<List<Map<String, dynamic>>> getModelDistribution() async {
     try {
       return await execute(
@@ -2278,7 +2096,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         (db) async {
           final results = await db.rawQuery(
             '''
-            SELECT 
+            SELECT
               model,
               COUNT(*) as count
             FROM $_metadataTable
@@ -2311,9 +2129,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     }
   }
 
-  /// 获取采样器分布统计
-  ///
-  /// 返回每个采样器的使用次数和占比
   Future<List<Map<String, dynamic>>> getSamplerDistribution() async {
     try {
       return await execute(
@@ -2321,7 +2136,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         (db) async {
           final results = await db.rawQuery(
             '''
-            SELECT 
+            SELECT
               sampler,
               COUNT(*) as count
             FROM $_metadataTable
