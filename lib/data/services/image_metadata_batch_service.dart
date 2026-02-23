@@ -188,13 +188,24 @@ class ImageMetadataBatchService {
       for (var i = 0; i < maxChunks; i++) {
         final chunk = chunks[i];
         final name = chunk['name'] as String?;
-        if (name != 'tEXt') continue; // NAI 元数据通常在 tEXt 中
+        // 【修复】支持 tEXt, zTXt, iTXt 三种chunk类型
+        if (name == null || !{'tEXt', 'zTXt', 'iTXt'}.contains(name)) continue;
 
         final data = chunk['data'] as Uint8List?;
         if (data == null) continue;
 
-        // 解析 tEXt chunk
-        final textData = _parseTextChunkSync(data);
+        // 【修复】根据chunk类型选择正确的解析方法
+        final String? textData;
+        switch (name) {
+          case 'tEXt':
+            textData = _parseTextChunkSync(data);
+          case 'zTXt':
+            textData = _parseZTXtChunkSync(data);
+          case 'iTXt':
+            textData = _parseITXtChunkSync(data);
+          default:
+            textData = null;
+        }
         if (textData == null) continue;
 
         // 快速检查：是否包含 NAI 特征
@@ -225,6 +236,74 @@ class ImageMetadataBatchService {
       if (!{'Comment', 'parameters'}.contains(keyword)) return null;
 
       return latin1.decode(data.sublist(nullIndex + 1));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 同步解析 zTXt chunk (压缩文本)
+  /// Format: keyword\0compressionMethod\0compressedText
+  static String? _parseZTXtChunkSync(Uint8List data) {
+    try {
+      // 找到第一个null分隔符 (keyword结束)
+      final firstNull = data.indexOf(0);
+      if (firstNull < 0 || firstNull + 1 >= data.length) return null;
+
+      // 只关心 Comment 或 parameters 类型的 chunk
+      final keyword = latin1.decode(data.sublist(0, firstNull));
+      if (!{'Comment', 'parameters'}.contains(keyword)) return null;
+
+      // 检查压缩方法 (必须为0表示deflate)
+      if (data[firstNull + 1] != 0) return null;
+
+      // 解压数据
+      final compressedData = data.sublist(firstNull + 2);
+      final inflated = ZLibCodec().decode(compressedData);
+      return utf8.decode(inflated);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 同步解析 iTXt chunk (国际化文本)
+  /// Format: keyword\0compressedFlag\0compressionMethod\0language\0translatedKeyword\0text
+  static String? _parseITXtChunkSync(Uint8List data) {
+    try {
+      var offset = 0;
+
+      // 跳过 keyword
+      final keywordEnd = data.indexOf(0, offset);
+      if (keywordEnd < 0) return null;
+      final keyword = utf8.decode(data.sublist(0, keywordEnd));
+      if (!{'Comment', 'parameters'}.contains(keyword)) return null;
+      offset = keywordEnd + 1;
+
+      if (offset + 1 >= data.length) return null;
+      final compressed = data[offset++];
+      final method = data[offset++];
+
+      // 跳过 language tag
+      final langEnd = data.indexOf(0, offset);
+      if (langEnd < 0) return null;
+      offset = langEnd + 1;
+
+      // 跳过 translated keyword
+      final transEnd = data.indexOf(0, offset);
+      if (transEnd < 0) return null;
+      offset = transEnd + 1;
+
+      if (offset >= data.length) return null;
+      final textData = data.sublist(offset);
+
+      if (compressed == 1) {
+        // 压缩数据
+        if (method != 0) return null;
+        final inflated = ZLibCodec().decode(textData);
+        return utf8.decode(inflated);
+      } else {
+        // 未压缩数据
+        return utf8.decode(textData);
+      }
     } catch (e) {
       return null;
     }

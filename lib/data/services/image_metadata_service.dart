@@ -362,10 +362,24 @@ class ImageMetadataService {
     }
   }
 
-  /// 从内存缓存获取元数据（同步）
+  /// 从缓存获取元数据（同步检查内存，异步检查持久化缓存）
+  ///
+  /// 【修复】如果内存缓存未命中，尝试从持久化缓存加载
   NaiImageMetadata? getCached(String path) {
     final cachedHash = _pathToHashMap[path];
-    return cachedHash != null ? _memoryCache.get(cachedHash) : null;
+    if (cachedHash != null) {
+      final memoryResult = _memoryCache.get(cachedHash);
+      if (memoryResult != null) return memoryResult;
+
+      // 【修复】内存未命中，尝试持久化缓存
+      final persistentResult = _getFromPersistentCache(cachedHash);
+      if (persistentResult != null) {
+        // 回填内存缓存
+        _memoryCache.put(cachedHash, persistentResult);
+        return persistentResult;
+      }
+    }
+    return null;
   }
 
   void preload(String path) => enqueuePreload(taskId: path, filePath: path);
@@ -404,8 +418,14 @@ class ImageMetadataService {
     final totalStopwatch = Stopwatch()..start();
     try {
       final file = File(path);
-      if (!await file.exists()) return null;
-      if (!path.toLowerCase().endsWith('.png')) return null;
+      if (!await file.exists()) {
+        AppLogger.w('[Metadata] File not found: $path', 'ImageMetadataService');
+        return null;
+      }
+      if (!path.toLowerCase().endsWith('.png')) {
+        AppLogger.w('[Metadata] Not a PNG file: $path', 'ImageMetadataService');
+        return null;
+      }
 
       NaiImageMetadata? metadata;
 
@@ -436,6 +456,11 @@ class ImageMetadataService {
       if (metadata != null && metadata.hasData) {
         _memoryCache.put(hash, metadata);
         await _saveToPersistentCache(hash, metadata);
+        AppLogger.d('[Metadata] Parsed and cached: $path (prompt length: ${metadata.prompt.length})', 'ImageMetadataService');
+      } else if (metadata != null) {
+        AppLogger.w('[Metadata] Parsed but hasData=false: $path (prompt: "${metadata.prompt}", seed: ${metadata.seed})', 'ImageMetadataService');
+      } else {
+        AppLogger.w('[Metadata] No metadata found: $path', 'ImageMetadataService');
       }
 
       totalStopwatch.stop();
@@ -446,7 +471,7 @@ class ImageMetadataService {
       return metadata;
     } catch (e, stack) {
       _parseErrors++;
-      AppLogger.e('Parse failed: $path', e, stack, 'ImageMetadataService');
+      AppLogger.e('[Metadata] Parse failed: $path', e, stack, 'ImageMetadataService');
       return null;
     }
   }
@@ -517,8 +542,10 @@ class ImageMetadataService {
   List<_PngChunk> _extractChunks(Uint8List bytes) {
     final chunks = <_PngChunk>[];
     var offset = 8;
+    var chunkCount = 0;
+    const maxChunks = 30; // 【修复】增加最大检查chunk数量
 
-    while (offset + 12 <= bytes.length) {
+    while (offset + 12 <= bytes.length && chunkCount < maxChunks) {
       final length = _readUint32(bytes, offset);
       offset += 4;
       if (offset + 4 > bytes.length) break;
@@ -528,7 +555,10 @@ class ImageMetadataService {
       final data = bytes.sublist(offset, offset + length);
       offset += length + 4;
       chunks.add(_PngChunk(name: name, data: data));
-      if (name == 'IDAT') break;
+      chunkCount++;
+      // 【修复】移除 IDAT 终止条件，继续检查更多chunks
+      // NAI元数据可能在IDAT之后（虽然通常在前）
+      if (name == 'IEND') break; // 只在IEND处停止
     }
 
     return chunks;

@@ -385,12 +385,13 @@ class NaiMetadataParser {
   /// 将元数据嵌入 PNG 图片
   ///
   /// 同时写入 stealth（alpha通道）和更新 tEXt chunk，确保两种解析方式都能读取
+  /// 【修复】改变顺序：先写 stealth，再写 tEXt，避免 tEXt 被 img.encodePng 丢失
   static Future<Uint8List> embedMetadata(Uint8List imageBytes, String metadataJson) async {
-    // 先尝试更新 tEXt chunk（更快）
-    final updatedBytes = await _updateTextChunk(imageBytes, metadataJson);
+    // 第1步：写入 stealth 数据（这会重新编码 PNG）
+    final stealthBytes = await _embedStealthData(imageBytes, metadataJson);
 
-    // 再写入 stealth 数据
-    return _embedStealthData(updatedBytes, metadataJson);
+    // 第2步：更新 tEXt chunk（在 stealth 之后，确保不会被丢失）
+    return _updateTextChunk(stealthBytes, metadataJson);
   }
 
   /// 更新 PNG 的 tEXt chunk 中的 Comment 字段
