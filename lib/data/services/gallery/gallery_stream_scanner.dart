@@ -163,6 +163,7 @@ class GalleryStreamScanner {
       // 【修复】使用预统计的总数，让进度显示更直观（如 0/8751 → 8751/8751）
       var stats = StreamScanStats(totalDiscovered: totalFiles);
       var processedCount = 0;
+      var skippedCount = 0; // 【调试】统计跳过的文件数
       
       await for (final file in _scanDirectory(rootDir)) {
         if (_shouldCancel) break;
@@ -177,6 +178,8 @@ class GalleryStreamScanner {
         final isSkipped = result.stage == FileProcessingStage.skipped;
         final isError = result.stage == FileProcessingStage.error;
         
+        if (isSkipped) skippedCount++;
+        
         stats = stats.copyWith(
           processed: isProcessed ? stats.processed + 1 : stats.processed,
           skipped: isSkipped ? stats.skipped + 1 : stats.skipped,
@@ -188,6 +191,15 @@ class GalleryStreamScanner {
           // 【修复】不覆盖 currentStage，保留 _processSingleFile 内部设置的阶段
           progress: totalFiles > 0 ? processedCount / totalFiles : 0.0,
         );
+        
+        // 【调试】每100个文件打印一次跳过统计
+        if (processedCount % 100 == 0) {
+          AppLogger.d(
+            '[StreamScan] Progress: $processedCount/$totalFiles, '
+            'skipped: $skippedCount (${(skippedCount/processedCount*100).toStringAsFixed(1)}%)',
+            'GalleryStreamScanner',
+          );
+        }
 
         // 发送结果
         _resultController.add(result);
@@ -214,7 +226,8 @@ class GalleryStreamScanner {
       _stateManager.completeScan();
       AppLogger.i(
         '[StreamScan] Scan completed: ${stats.totalDiscovered} discovered, '
-        '${stats.processed} processed, ${stats.withMetadata} with metadata',
+        '${stats.processed} processed, ${stats.withMetadata} with metadata, '
+        '${stats.skipped} skipped (${(stats.skipped/stats.totalDiscovered*100).toStringAsFixed(1)}%)',
         'GalleryStreamScanner',
       );
 
@@ -320,13 +333,27 @@ class GalleryStreamScanner {
   ) async {
     final path = file.path;
     final fileName = p.basename(path);
+    
+      // 【修复】在 try 外获取 existing，确保 catch 块也能访问
+      final existing = _existingMap[path];
 
     try {
       // 阶段1: 索引检查
       _updateStage(stats, FileProcessingStage.indexing, fileName);
       
       final stat = await file.stat();
-      final existing = _existingMap[path];
+      
+      // 【调试日志】打印缓存命中情况
+      if (existing != null) {
+        final (_, _, _, metadataStatus, lastScannedAt) = existing;
+        AppLogger.d(
+          '[StreamScan] Cache hit: $fileName, '
+          'status=${metadataStatus.name}, lastScannedAt=$lastScannedAt',
+          'GalleryStreamScanner',
+        );
+      } else {
+        AppLogger.d('[StreamScan] Cache miss: $fileName', 'GalleryStreamScanner');
+      }
       
       // 【新增】检测移动/重命名：检查是否有相同签名（size+mtime）的旧记录
       final signature = '${stat.size}:${stat.modified.millisecondsSinceEpoch}';
@@ -343,10 +370,17 @@ class GalleryStreamScanner {
         if (stat.size != existingSize ||
             stat.modified.millisecondsSinceEpoch != existingMtime) {
           needsUpdate = true; // 文件已变化
-        } else if (metadataStatus == MetadataStatus.none) {
-          needsUpdate = true; // 缺少元数据
         } else if (lastScannedAt == null) {
-          needsUpdate = true; // 从未扫描
+          needsUpdate = true; // 从未扫描（迁移后的旧数据）
+        } else if (metadataStatus == MetadataStatus.none) {
+          // 【修复】已扫描过但没有元数据的文件，跳过避免重复处理
+          // 只有当文件被修改过（mtime变化）才需要重新扫描
+          needsUpdate = false;
+          AppLogger.d(
+            '[StreamScan] Skip re-scan (no metadata): $fileName, '
+            'last scanned at $lastScannedAt',
+            'GalleryStreamScanner',
+          );
         } else {
           needsUpdate = false; // 无需处理
         }
@@ -355,6 +389,8 @@ class GalleryStreamScanner {
       }
 
       if (!needsUpdate) {
+        // 【新增】增加跳过计数
+        _stateManager.incrementSkippedCount();
         return FileProcessingResult(
           path: path,
           stage: FileProcessingStage.skipped,
@@ -454,6 +490,23 @@ class GalleryStreamScanner {
 
     } catch (e) {
       AppLogger.w('[StreamScan] Error processing $fileName: $e', 'GalleryStreamScanner');
+      
+      // 【修复】增加失败计数
+      _stateManager.incrementFailedCount();
+      
+      // 【修复】即使处理失败，也更新缓存标记为已扫描
+      // 避免每次扫描都重复处理有问题的文件
+      if (existing != null) {
+        final (existingSize, existingMtime, existingId, _, _) = existing;
+        _existingMap[path] = (
+          existingSize,
+          existingMtime,
+          existingId,
+          MetadataStatus.none,
+          DateTime.now(), // 标记为已扫描，即使失败
+        );
+      }
+      
       return FileProcessingResult(
         path: path,
         stage: FileProcessingStage.error,

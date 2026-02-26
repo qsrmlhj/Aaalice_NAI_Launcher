@@ -83,18 +83,11 @@ class GalleryScanProgressPanel extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 10),
-          // 进度条（基于发现的总文件数）
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: progress > 0 ? progress : null, // null 显示不确定进度
-              minHeight: 6,
-              backgroundColor: theme.colorScheme.surfaceContainerHighest,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                theme.colorScheme.primary,
-              ),
-            ),
-          ),
+          // 彩色分段进度条
+          _buildSegmentedProgressBar(theme, scanState),
+          const SizedBox(height: 6),
+          // 进度条图例
+          _buildProgressLegend(theme, scanState),
           const SizedBox(height: 8),
           // 当前阶段标签
           Row(
@@ -164,7 +157,7 @@ class GalleryScanProgressPanel extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 10),
-          // 三列统计
+          // 四列统计（新增跳过列）
           Row(
             children: [
               Expanded(
@@ -182,6 +175,15 @@ class GalleryScanProgressPanel extends ConsumerWidget {
                   value: '${stats.withMetadata}',
                   icon: Icons.check_circle_outline,
                   valueColor: Colors.green,
+                ),
+              ),
+              Expanded(
+                child: _buildStatColumn(
+                  theme,
+                  label: '跳过',
+                  value: '${stats.skipped}',
+                  icon: Icons.skip_next_outlined,
+                  valueColor: Colors.orange,
                 ),
               ),
               Expanded(
@@ -266,5 +268,210 @@ class GalleryScanProgressPanel extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  /// 构建彩色分段进度条
+  /// 
+  /// 使用不同颜色显示不同状态的文件：
+  /// - 绿色：已扫描过且跳过（缓存命中）
+  /// - 蓝色：有元数据（解析成功）
+  /// - 红色：扫描错误
+  /// - 灰色/默认：待处理
+  Widget _buildSegmentedProgressBar(ThemeData theme, ScanProgressState scanState) {
+    final stats = scanState.cacheStats;
+    final total = stats.totalImages;
+    
+    if (total == 0) {
+      // 初始状态显示灰色进度条
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: LinearProgressIndicator(
+          value: null, // 不确定进度
+          minHeight: 8,
+          backgroundColor: theme.colorScheme.surfaceContainerHighest,
+          valueColor: AlwaysStoppedAnimation<Color>(
+            theme.colorScheme.primary,
+          ),
+        ),
+      );
+    }
+
+    // 计算各状态的比例
+    final skippedRatio = stats.skipped / total;
+    final withMetadataRatio = stats.withMetadata / total;
+    final failedRatio = stats.failedMetadata / total;
+    final processedRatio = stats.processed / total;
+    
+    // 当前正在处理的部分 = 已处理 - 已分类
+    final processingRatio = (processedRatio - skippedRatio - withMetadataRatio - failedRatio).clamp(0.0, 1.0);
+    
+    // 待处理的部分
+    final pendingRatio = (1.0 - processedRatio).clamp(0.0, 1.0);
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        height: 8,
+        child: Row(
+          children: [
+            // 绿色：跳过的（已扫描过，缓存命中）
+            if (skippedRatio > 0)
+              Expanded(
+                flex: (skippedRatio * 1000).round(),
+                child: Container(color: Colors.green.shade400),
+              ),
+            // 蓝色：有元数据的（解析成功）
+            if (withMetadataRatio > 0)
+              Expanded(
+                flex: (withMetadataRatio * 1000).round(),
+                child: Container(color: Colors.blue.shade400),
+              ),
+            // 红色：扫描错误的
+            if (failedRatio > 0)
+              Expanded(
+                flex: (failedRatio * 1000).round(),
+                child: Container(color: Colors.red.shade400),
+              ),
+            // 紫色：正在处理的
+            if (processingRatio > 0)
+              Expanded(
+                flex: (processingRatio * 1000).round(),
+                child: Container(
+                  color: theme.colorScheme.primary,
+                  child: const _AnimatedStripes(),
+                ),
+              ),
+            // 灰色：待处理的
+            if (pendingRatio > 0)
+              Expanded(
+                flex: (pendingRatio * 1000).round(),
+                child: Container(color: theme.colorScheme.surfaceContainerHighest),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建进度条图例
+  Widget _buildProgressLegend(ThemeData theme, ScanProgressState scanState) {
+    final stats = scanState.cacheStats;
+    
+    return Wrap(
+      spacing: 12,
+      runSpacing: 4,
+      children: [
+        if (stats.skipped > 0)
+          _buildLegendItem(Colors.green.shade400, '跳过 ${stats.skipped}'),
+        if (stats.withMetadata > 0)
+          _buildLegendItem(Colors.blue.shade400, '有元数据 ${stats.withMetadata}'),
+        if (stats.failedMetadata > 0)
+          _buildLegendItem(Colors.red.shade400, '失败 ${stats.failedMetadata}'),
+        _buildLegendItem(theme.colorScheme.primary, '处理中'),
+        _buildLegendItem(theme.colorScheme.surfaceContainerHighest, '待处理'),
+      ],
+    );
+  }
+
+  /// 构建图例项
+  Widget _buildLegendItem(Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: Colors.grey.shade600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 动画条纹效果（表示处理中）
+class _AnimatedStripes extends StatefulWidget {
+  const _AnimatedStripes();
+
+  @override
+  State<_AnimatedStripes> createState() => _AnimatedStripesState();
+}
+
+class _AnimatedStripesState extends State<_AnimatedStripes>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return CustomPaint(
+          size: const Size(double.infinity, 8),
+          painter: _StripesPainter(
+            progress: _controller.value,
+            color: Colors.white.withOpacity(0.3),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 条纹绘制器
+class _StripesPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  _StripesPainter({required this.progress, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+
+    const stripeWidth = 8.0;
+    const gap = 8.0;
+    final offset = progress * (stripeWidth + gap);
+
+    for (double x = -stripeWidth; x < size.width + stripeWidth; x += stripeWidth + gap) {
+      canvas.drawLine(
+        Offset(x + offset, 0),
+        Offset(x + offset - stripeWidth / 2, size.height),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _StripesPainter oldDelegate) {
+    return oldDelegate.progress != progress;
   }
 }

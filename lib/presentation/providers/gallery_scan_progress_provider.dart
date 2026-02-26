@@ -19,6 +19,8 @@ class MetadataCacheStats {
   final int failedMetadata;
   /// 无元数据的图片数（未解析）
   final int withoutMetadata;
+  /// 跳过的文件数（已扫描过且未变化）
+  final int skipped;
   /// 当前正在处理的阶段
   final String currentStage;
   /// 当前处理的文件名
@@ -34,6 +36,7 @@ class MetadataCacheStats {
     this.withMetadata = 0,
     this.failedMetadata = 0,
     this.withoutMetadata = 0,
+    this.skipped = 0,
     this.currentStage = '',
     this.currentFile = '',
   });
@@ -44,6 +47,7 @@ class MetadataCacheStats {
     int? withMetadata,
     int? failedMetadata,
     int? withoutMetadata,
+    int? skipped,
     String? currentStage,
     String? currentFile,
   }) {
@@ -53,6 +57,7 @@ class MetadataCacheStats {
       withMetadata: withMetadata ?? this.withMetadata,
       failedMetadata: failedMetadata ?? this.failedMetadata,
       withoutMetadata: withoutMetadata ?? this.withoutMetadata,
+      skipped: skipped ?? this.skipped,
       currentStage: currentStage ?? this.currentStage,
       currentFile: currentFile ?? this.currentFile,
     );
@@ -92,6 +97,22 @@ class ScanProgressState {
   
   /// 剩余未处理的文件数
   int get remainingCount => cacheStats.remaining;
+  
+  /// 计算各状态占总数的比例（用于彩色进度条）
+  /// 返回: [跳过的比例, 有元数据的比例, 失败的比例, 处理中的比例]
+  List<double> get progressSegments {
+    final total = cacheStats.totalImages;
+    if (total == 0) return [0.0, 0.0, 0.0, 0.0];
+    
+    final skipped = cacheStats.skipped / total;
+    final withMetadata = cacheStats.withMetadata / total;
+    final failed = cacheStats.failedMetadata / total;
+    // 处理中的 = 已处理的 - 跳过的 - 有元数据的 - 失败的
+    final processed = cacheStats.processed / total;
+    final processing = (processed - skipped - (withMetadata - baselineStats.withMetadata / total).clamp(0.0, 1.0) - (failed - baselineStats.failedMetadata / total).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    
+    return [skipped, withMetadata, failed, processing];
+  }
 
   ScanProgressState copyWith({
     bool? isScanning,
@@ -117,9 +138,6 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
   StreamSubscription<ScanStatus>? _statusSubscription;
   StreamSubscription<ScanProgressInfo>? _progressSubscription;
   Timer? _hideTimer;
-  
-  /// 本地追踪失败计数（因为 ScanStateManager 没有提供失败计数）
-  int _failedCount = 0;
 
   GalleryScanProgressNotifier() : super(const ScanProgressState()) {
     // 订阅 ScanStateManager 的状态变化
@@ -134,11 +152,8 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
     final total = progress.total;
     final processed = progress.processed;
     final withMetadata = scanManager.metadataCacheCount;
-    
-    // 估算失败数量：已处理的 - 有元数据的（简化处理）
-    // 注意：processed 可能包含跳过的文件，所以这里需要确保不为负数
-    final failed = processed > withMetadata ? processed - withMetadata : 0;
-    _failedCount = failed;
+    final skipped = scanManager.skippedCount;
+    final failed = scanManager.failedCount;
     
     // 【修复】处理文件名：如果新文件名为空，保留旧值
     final currentFile = progress.currentFile?.isNotEmpty == true
@@ -153,7 +168,8 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
           totalImages: total,
           processed: processed, // 【修复】添加已处理数量
           withMetadata: withMetadata,
-          failedMetadata: _failedCount,
+          failedMetadata: failed, // 【修复】使用 ScanStateManager 的失败计数
+          skipped: skipped, // 【新增】跳过的文件数
           currentStage: progress.phase.name,
           currentFile: currentFile,
         ),
@@ -209,7 +225,6 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
     // 3秒后自动隐藏进度条
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 3), () {
-      _failedCount = 0;
       state = const ScanProgressState();
     });
   }
@@ -217,7 +232,6 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
   /// 重置状态
   void reset() {
     _hideTimer?.cancel();
-    _failedCount = 0;
     state = const ScanProgressState();
   }
 

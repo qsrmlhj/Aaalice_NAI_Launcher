@@ -413,6 +413,36 @@ class ScanStateManager {
     _progressController.add(_progress);
   }
   
+  // 跳过的文件计数
+  int _skippedCount = 0;
+  int get skippedCount => _skippedCount;
+  
+  /// 增加跳过计数
+  void incrementSkippedCount() {
+    _skippedCount++;
+    _progressController.add(_progress);
+  }
+  
+  /// 重置跳过计数
+  void resetSkippedCount() {
+    _skippedCount = 0;
+  }
+  
+  // 失败的文件计数
+  int _failedCount = 0;
+  int get failedCount => _failedCount;
+  
+  /// 增加失败计数
+  void incrementFailedCount() {
+    _failedCount++;
+    _progressController.add(_progress);
+  }
+  
+  /// 重置失败计数
+  void resetFailedCount() {
+    _failedCount = 0;
+  }
+  
   /// 设置元数据缓存计数
   void setMetadataCacheCount(int count) {
     _metadataCacheCount = count;
@@ -462,6 +492,8 @@ class ScanStateManager {
     _currentScanType = type;
     _existingInDatabase = existingInDatabase;
     _metadataCacheCount = metadataCacheCount;
+    _skippedCount = 0; // 重置跳过计数
+    _failedCount = 0; // 重置失败计数
     _status = ScanStatus.scanning;
     _progress = ScanProgressInfo(total: total);
     _statistics = ScanStatistics(startTime: DateTime.now());
