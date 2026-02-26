@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -8,8 +9,11 @@ import '../../core/exceptions/gallery_exceptions.dart';
 import '../../core/utils/app_logger.dart';
 import '../../data/models/gallery/local_image_record.dart';
 import '../../data/models/gallery/nai_image_metadata.dart';
+import '../../core/database/datasources/gallery_data_source.dart';
+import '../../data/repositories/gallery_folder_repository.dart';
 import '../../data/services/gallery/gallery_filter_service.dart';
-import '../../data/services/gallery/gallery_scan_service.dart';
+import '../../data/services/gallery/gallery_stream_scanner.dart';
+import '../../data/services/gallery/scan_state_manager.dart';
 import '../../data/services/gallery/unified_gallery_service.dart';
 
 part 'local_gallery_provider.freezed.dart';
@@ -665,11 +669,22 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
   bool _shouldCancelRebuild = false;
 
-  /// 重建索引（全量扫描）
-  Future<ScanResult?> performFullScan() async {
+  /// 重新扫描（全量扫描）
+  /// 
+  /// 使用统一的流式扫描逻辑：
+  /// - 检查数据一致性（标记不存在的文件）
+  /// - 查漏补缺（新文件、变更文件）
+  /// - 提取元数据
+  Future<void> performFullScan() async {
     if (state.isRebuildingIndex) {
       _shouldCancelRebuild = true;
-      return null;
+      return;
+    }
+
+    // 检查是否已有扫描在进行中
+    if (ScanStateManager.instance.isScanning) {
+      AppLogger.w('[LocalGallery] Scan already in progress, skipping', 'LocalGalleryNotifier');
+      return;
     }
 
     _shouldCancelRebuild = false;
@@ -679,11 +694,30 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
     ),);
 
     try {
-      final service = await _getService();
+      final rootPath = await GalleryFolderRepository.instance.getRootPath();
+      if (rootPath == null) {
+        throw GalleryScanException(message: '未设置画廊目录');
+      }
 
-      // 设置进度回调
-      // 注意：服务层需要支持进度回调才能实时更新
-      final result = await service.rebuildIndex();
+      final dir = Directory(rootPath);
+      if (!dir.existsSync()) {
+        throw GalleryScanException(message: '画廊目录不存在');
+      }
+
+      // 使用统一的流式扫描器
+      final dataSource = GalleryDataSource();
+      final scanner = GalleryStreamScanner(dataSource: dataSource);
+
+      await scanner.startScanning(
+        dir,
+        onFileProcessed: (result, stats) {
+          AppLogger.d(
+            '[FullScan] Processed: ${result.path.split(Platform.pathSeparator).last}, '
+            'stage: ${result.stage}',
+            'LocalGalleryNotifier',
+          );
+        },
+      );
 
       if (_shouldCancelRebuild) {
         _shouldCancelRebuild = false;
@@ -691,8 +725,11 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
           isRebuildingIndex: false,
           isLoading: false,
         ),);
-        return null;
+        return;
       }
+
+      // 刷新服务状态
+      final service = await _getService();
 
       // 刷新状态
       _setState(state.copyWith(
@@ -704,30 +741,25 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
       // 刷新当前页
       await loadPage(0, showLoading: false);
-
-      return result;
     } on GalleryCancelledException {
       _setState(state.copyWith(
         isRebuildingIndex: false,
         isLoading: false,
       ),);
-      return null;
     } on GalleryScanException catch (e) {
-      AppLogger.e('Rebuild index failed', e, null, 'LocalGalleryNotifier');
+      AppLogger.e('Full scan failed', e, null, 'LocalGalleryNotifier');
       _setState(state.copyWith(
-        error: '重建索引失败: ${e.message}',
+        error: '扫描失败: ${e.message}',
         isRebuildingIndex: false,
         isLoading: false,
       ),);
-      return null;
     } catch (e) {
-      AppLogger.e('Rebuild index failed', e, null, 'LocalGalleryNotifier');
+      AppLogger.e('Full scan failed', e, null, 'LocalGalleryNotifier');
       _setState(state.copyWith(
-        error: '重建索引失败: $e',
+        error: '扫描失败: $e',
         isRebuildingIndex: false,
         isLoading: false,
       ),);
-      return null;
     }
   }
 

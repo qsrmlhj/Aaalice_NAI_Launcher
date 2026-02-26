@@ -409,6 +409,8 @@ class ScanStateManager {
   /// 增加元数据缓存计数
   void incrementMetadataCacheCount() {
     _metadataCacheCount++;
+    // 触发进度流更新，让UI刷新元数据计数
+    _progressController.add(_progress);
   }
   
   /// 设置元数据缓存计数

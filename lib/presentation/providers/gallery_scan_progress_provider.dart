@@ -109,6 +109,9 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
   StreamSubscription<ScanStatus>? _statusSubscription;
   StreamSubscription<ScanProgressInfo>? _progressSubscription;
   Timer? _hideTimer;
+  
+  /// 本地追踪失败计数（因为 ScanStateManager 没有提供失败计数）
+  int _failedCount = 0;
 
   GalleryScanProgressNotifier() : super(const ScanProgressState()) {
     // 订阅 ScanStateManager 的状态变化
@@ -124,6 +127,11 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
     final processed = progress.processed;
     final withMetadata = scanManager.metadataCacheCount;
     
+    // 估算失败数量：已处理的 - 有元数据的（简化处理）
+    // 注意：processed 可能包含跳过的文件，所以这里需要确保不为负数
+    final failed = processed > withMetadata ? processed - withMetadata : 0;
+    _failedCount = failed;
+    
     // 更新状态（从 ScanStateManager 获取元数据计数）
     if (state.isScanning || scanManager.isScanning) {
       state = state.copyWith(
@@ -131,7 +139,7 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
         cacheStats: MetadataCacheStats(
           totalImages: total,
           withMetadata: withMetadata,
-          failedMetadata: state.cacheStats.failedMetadata,
+          failedMetadata: _failedCount,
           currentStage: progress.phase.name,
           currentFile: progress.currentFile ?? state.cacheStats.currentFile,
         ),
@@ -145,7 +153,17 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
     switch (status) {
       case ScanStatus.scanning:
         if (!state.isScanning) {
-          state = state.copyWith(isScanning: true);
+          final scanManager = ScanStateManager.instance;
+          // 【修复】扫描开始时，使用 ScanStateManager 中已有的元数据计数作为初始值
+          final initialMetadataCount = scanManager.metadataCacheCount;
+          state = state.copyWith(
+            isScanning: true,
+            cacheStats: MetadataCacheStats(
+              totalImages: 0, // 将在第一个进度更新时设置
+              withMetadata: initialMetadataCount,
+              currentStage: 'scanning',
+            ),
+          );
         }
         break;
       case ScanStatus.completed:
@@ -175,6 +193,7 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
     // 3秒后自动隐藏进度条
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 3), () {
+      _failedCount = 0;
       state = const ScanProgressState();
     });
   }
@@ -182,6 +201,7 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
   /// 重置状态
   void reset() {
     _hideTimer?.cancel();
+    _failedCount = 0;
     state = const ScanProgressState();
   }
 

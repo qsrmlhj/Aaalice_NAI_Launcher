@@ -120,9 +120,11 @@ class GalleryStreamScanner {
   /// 开始流式扫描
   /// 
   /// [onFileProcessed] - 每个文件处理完成时的回调
+  /// [checkConsistency] - 是否在扫描前检查数据一致性（删除不存在的文件记录）
   Future<void> startScanning(
     Directory rootDir, {
     void Function(FileProcessingResult result, StreamScanStats stats)? onFileProcessed,
+    bool checkConsistency = true,
   }) async {
     if (_isRunning) {
       AppLogger.w('[StreamScan] Scanner already running', 'GalleryStreamScanner');
@@ -135,19 +137,25 @@ class GalleryStreamScanner {
     AppLogger.i('[StreamScan] Starting stream scan: ${rootDir.path}', 'GalleryStreamScanner');
 
     try {
-      // 1. 预加载数据库记录（只加载一次）
-      await _preloadExistingRecords();
+      // 1. 预加载数据库记录（只加载一次），获取已有元数据数量
+      final existingMetadataCount = await _preloadExistingRecords();
       
-      // 2. 启动扫描状态管理器（总文件数未知，边扫描边更新）
+      // 2. 【新增】检查数据一致性：删除数据库中不存在于文件系统的记录
+      if (checkConsistency) {
+        await _fixDataConsistency();
+      }
+      
+      // 3. 启动扫描状态管理器（总文件数未知，边扫描边更新）
+      // 【修复】传入已有的元数据数量作为初始值
       _stateManager.startScan(
         type: ScanType.incremental,
         rootPath: rootDir.path,
         total: 0, // 流式扫描，总数动态更新
         existingInDatabase: _existingMap.length,
-        metadataCacheCount: _existingMap.values.where((e) => e.$4 == MetadataStatus.success).length,
+        metadataCacheCount: existingMetadataCount,
       );
 
-      // 3. 流式处理：发现文件 → 立即处理
+      // 4. 流式处理：发现文件 → 立即处理
       var stats = StreamScanStats();
       
       await for (final file in _scanDirectory(rootDir)) {
@@ -228,10 +236,21 @@ class GalleryStreamScanner {
     AppLogger.i('[StreamScan] Scan cancelled by user', 'GalleryStreamScanner');
   }
 
+  /// 文件签名到路径的映射（用于检测移动/重命名）
+  /// 签名格式: "size:mtime"
+  final Map<String, String> _signatureToPath = {};
+  
+  /// 路径到文件ID的映射（用于移动检测）
+  final Map<String, int> _pathToId = {};
+
   /// 预加载现有记录
-  Future<void> _preloadExistingRecords() async {
+  Future<int> _preloadExistingRecords() async {
     final existingRecords = await _dataSource.getAllImages();
     _existingMap.clear();
+    _signatureToPath.clear();
+    _pathToId.clear();
+    var metadataCount = 0;
+    
     for (final img in existingRecords) {
       if (!img.isDeleted && img.id != null) {
         _existingMap[img.filePath] = (
@@ -241,12 +260,59 @@ class GalleryStreamScanner {
           img.metadataStatus,
           img.lastScannedAt,
         );
+        _pathToId[img.filePath] = img.id!;
+        
+        // 建立签名映射（用于检测移动/重命名）
+        final signature = '${img.fileSize}:${img.modifiedAt.millisecondsSinceEpoch}';
+        _signatureToPath[signature] = img.filePath;
+        
+        // 统计已有元数据的记录
+        if (img.metadataStatus == MetadataStatus.success) {
+          metadataCount++;
+        }
       }
     }
     AppLogger.i(
-      '[StreamScan] Preloaded ${_existingMap.length} existing records',
+      '[StreamScan] Preloaded ${_existingMap.length} existing records, '
+      '$metadataCount with metadata',
       'GalleryStreamScanner',
     );
+    return metadataCount;
+  }
+
+  /// 修复数据一致性
+  /// 
+  /// 检查数据库中所有未删除的记录，如果文件不存在则标记为已删除
+  /// 返回被标记为删除的记录数量
+  Future<int> _fixDataConsistency() async {
+    AppLogger.i('[StreamScan] Checking data consistency...', 'GalleryStreamScanner');
+    
+    final orphanedPaths = <String>[];
+    
+    for (final entry in _existingMap.entries) {
+      if (_shouldCancel) break;
+      
+      final path = entry.key;
+      final file = File(path);
+      
+      if (!await file.exists()) {
+        orphanedPaths.add(path);
+      }
+    }
+    
+    if (orphanedPaths.isNotEmpty) {
+      await _dataSource.batchMarkAsDeleted(orphanedPaths);
+      // 从本地缓存中移除
+      for (final path in orphanedPaths) {
+        _existingMap.remove(path);
+      }
+      AppLogger.i(
+        '[StreamScan] Marked ${orphanedPaths.length} orphaned records as deleted',
+        'GalleryStreamScanner',
+      );
+    }
+    
+    return orphanedPaths.length;
   }
 
   /// 处理单个文件
@@ -264,10 +330,17 @@ class GalleryStreamScanner {
       final stat = await file.stat();
       final existing = _existingMap[path];
       
+      // 【新增】检测移动/重命名：检查是否有相同签名（size+mtime）的旧记录
+      final signature = '${stat.size}:${stat.modified.millisecondsSinceEpoch}';
+      final movedFromPath = _signatureToPath[signature];
+      final bool isMoved = movedFromPath != null && movedFromPath != path;
+      
       final bool needsUpdate;
-      if (existing == null) {
-        needsUpdate = true; // 新文件
-      } else {
+      if (existing == null && !isMoved) {
+        needsUpdate = true; // 真正的新文件
+      } else if (isMoved) {
+        needsUpdate = true; // 移动/重命名，需要更新路径
+      } else if (existing != null) {
         final (existingSize, existingMtime, _, metadataStatus, lastScannedAt) = existing;
         if (stat.size != existingSize ||
             stat.modified.millisecondsSinceEpoch != existingMtime) {
@@ -279,6 +352,8 @@ class GalleryStreamScanner {
         } else {
           needsUpdate = false; // 无需处理
         }
+      } else {
+        needsUpdate = false;
       }
 
       if (!needsUpdate) {
@@ -288,7 +363,40 @@ class GalleryStreamScanner {
         );
       }
 
-      // 阶段2: 提取元数据
+      // 【新增】处理移动/重命名：直接更新路径，不重新提取元数据
+      if (isMoved) {
+        final oldImageId = _pathToId[movedFromPath];
+        if (oldImageId != null) {
+          AppLogger.d(
+            '[StreamScan] Detected move/rename: $movedFromPath -> $path',
+            'GalleryStreamScanner',
+          );
+          
+          // 更新文件路径
+          await _dataSource.updateFilePath(oldImageId, path, newFileName: fileName);
+          
+          // 更新本地缓存
+          final oldRecord = _existingMap.remove(movedFromPath);
+          if (oldRecord != null) {
+            _existingMap[path] = (stat.size, stat.modified.millisecondsSinceEpoch, 
+                oldImageId, oldRecord.$4, DateTime.now());
+          }
+          _pathToId.remove(movedFromPath);
+          _pathToId[path] = oldImageId;
+          
+          // 清除该签名的映射（避免重复匹配）
+          _signatureToPath.remove(signature);
+          
+          return FileProcessingResult(
+            path: path,
+            stage: FileProcessingStage.completed,
+            isNewFile: false,
+            metadataUpdated: false,
+          );
+        }
+      }
+
+      // 阶段2: 提取元数据（仅对真正的新文件或变更文件）
       _updateStage(stats, FileProcessingStage.extracting, fileName);
       final metadata = await _metadataService.getMetadataImmediate(file.path);
 
@@ -328,7 +436,13 @@ class GalleryStreamScanner {
           MetadataStatus.success,
           DateTime.now(),
         );
+        
+        // 更新 ScanStateManager 的元数据计数
+        _stateManager.incrementMetadataCacheCount();
       }
+      
+      // 更新路径映射
+      _pathToId[path] = imageId;
 
       // 阶段4: 完成
       return FileProcessingResult(
