@@ -11,6 +11,8 @@ import '../../data/services/gallery/scan_state_manager.dart';
 class MetadataCacheStats {
   /// 总图片数（流式扫描中动态更新）
   final int totalImages;
+  /// 已处理的图片数（processed + skipped）
+  final int processed;
   /// 有元数据的图片数（解析成功）
   final int withMetadata;
   /// 解析失败的图片数
@@ -23,11 +25,12 @@ class MetadataCacheStats {
   final String currentFile;
   /// 元数据缓存覆盖率 (0.0 - 1.0)
   double get coverage => totalImages > 0 ? withMetadata / totalImages : 0.0;
-  /// 需要处理的剩余数量
-  int get remaining => totalImages - withMetadata;
+  /// 需要处理的剩余数量（确保不为负数）
+  int get remaining => totalImages > processed ? totalImages - processed : 0;
 
   const MetadataCacheStats({
     this.totalImages = 0,
+    this.processed = 0,
     this.withMetadata = 0,
     this.failedMetadata = 0,
     this.withoutMetadata = 0,
@@ -37,6 +40,7 @@ class MetadataCacheStats {
 
   MetadataCacheStats copyWith({
     int? totalImages,
+    int? processed,
     int? withMetadata,
     int? failedMetadata,
     int? withoutMetadata,
@@ -45,6 +49,7 @@ class MetadataCacheStats {
   }) {
     return MetadataCacheStats(
       totalImages: totalImages ?? this.totalImages,
+      processed: processed ?? this.processed,
       withMetadata: withMetadata ?? this.withMetadata,
       failedMetadata: failedMetadata ?? this.failedMetadata,
       withoutMetadata: withoutMetadata ?? this.withoutMetadata,
@@ -76,14 +81,17 @@ class ScanProgressState {
     this.errors = const [],
   });
 
-  /// 计算覆盖率百分比
-  String get coveragePercentage => '${(cacheStats.coverage * 100).toStringAsFixed(1)}%';
+  /// 计算处理进度百分比（已处理 / 总数）
+  String get coveragePercentage => '${(progress * 100).toStringAsFixed(1)}%';
   
   /// 计算本次扫描新增的有元数据数量
   int get newlyParsed => cacheStats.withMetadata - baselineStats.withMetadata;
   
-  /// 计算已处理的文件数
-  int get processedCount => cacheStats.withMetadata + cacheStats.failedMetadata;
+  /// 已处理的文件数（直接从 cacheStats 获取）
+  int get processedCount => cacheStats.processed;
+  
+  /// 剩余未处理的文件数
+  int get remainingCount => cacheStats.remaining;
 
   ScanProgressState copyWith({
     bool? isScanning,
@@ -143,6 +151,7 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
         isScanning: true,
         cacheStats: MetadataCacheStats(
           totalImages: total,
+          processed: processed, // 【修复】添加已处理数量
           withMetadata: withMetadata,
           failedMetadata: _failedCount,
           currentStage: progress.phase.name,
@@ -165,6 +174,7 @@ class GalleryScanProgressNotifier extends StateNotifier<ScanProgressState> {
             isScanning: true,
             cacheStats: MetadataCacheStats(
               totalImages: 0, // 将在第一个进度更新时设置
+              processed: 0,
               withMetadata: initialMetadataCount,
               currentStage: 'scanning',
               currentFile: state.cacheStats.currentFile, // 保留之前的文件名
