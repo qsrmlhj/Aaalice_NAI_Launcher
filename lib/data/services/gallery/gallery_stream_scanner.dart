@@ -145,50 +145,49 @@ class GalleryStreamScanner {
         await _fixDataConsistency();
       }
       
-      // 3. 启动扫描状态管理器（总文件数未知，边扫描边更新）
-      // 【修复】传入已有的元数据数量作为初始值
+      // 3. 【关键修改】先遍历一遍统计总数（让用户看到固定的总进度）
+      AppLogger.i('[StreamScan] Counting total files...', 'GalleryStreamScanner');
+      final totalFiles = await _countTotalFiles(rootDir);
+      AppLogger.i('[StreamScan] Total files to scan: $totalFiles', 'GalleryStreamScanner');
+      
+      // 4. 启动扫描状态管理器（使用固定的总文件数）
       _stateManager.startScan(
         type: ScanType.incremental,
         rootPath: rootDir.path,
-        total: 0, // 流式扫描，总数动态更新
+        total: totalFiles, // 【修复】使用固定的总数
         existingInDatabase: _existingMap.length,
         metadataCacheCount: existingMetadataCount,
       );
 
-      // 4. 流式处理：发现文件 → 立即处理
-      var stats = StreamScanStats();
+      // 5. 流式处理：发现文件 → 立即处理
+      // 【修复】使用预统计的总数，让进度显示更直观（如 0/8751 → 8751/8751）
+      var stats = StreamScanStats(totalDiscovered: totalFiles);
+      var processedCount = 0;
       
       await for (final file in _scanDirectory(rootDir)) {
         if (_shouldCancel) break;
-
-        // 更新发现计数
-        stats = stats.copyWith(
-          totalDiscovered: stats.totalDiscovered + 1,
-          currentFile: p.basename(file.path),
-          currentStage: FileProcessingStage.discovered,
-        );
-        _statsController.add(stats);
 
         // 立即处理这个文件
         final result = await _processSingleFile(file, stats);
         
         // 更新统计
+        processedCount++;
+        final isProcessed = result.stage == FileProcessingStage.completed || 
+                           result.stage == FileProcessingStage.error;
+        final isSkipped = result.stage == FileProcessingStage.skipped;
+        
         stats = stats.copyWith(
-          processed: result.stage == FileProcessingStage.completed || result.stage == FileProcessingStage.error
-              ? stats.processed + 1
-              : stats.processed,
-          skipped: result.stage == FileProcessingStage.skipped
-              ? stats.skipped + 1
-              : stats.skipped,
+          processed: isProcessed ? stats.processed + 1 : stats.processed,
+          skipped: isSkipped ? stats.skipped + 1 : stats.skipped,
           withMetadata: result.metadata != null && result.metadata!.hasData
               ? stats.withMetadata + 1
               : stats.withMetadata,
           failed: result.stage == FileProcessingStage.error
               ? stats.failed + 1
               : stats.failed,
-          progress: stats.totalDiscovered > 0
-              ? (stats.processed + stats.skipped) / stats.totalDiscovered
-              : 0.0,
+          currentFile: p.basename(file.path),
+          currentStage: result.stage,
+          progress: totalFiles > 0 ? processedCount / totalFiles : 0.0,
         );
 
         // 发送结果
@@ -198,16 +197,16 @@ class GalleryStreamScanner {
         // 回调
         onFileProcessed?.call(result, stats);
 
-        // 更新 ScanStateManager
+        // 更新 ScanStateManager（使用固定的总数）
         _stateManager.updateProgress(
-          processed: stats.processed + stats.skipped,
-          total: stats.totalDiscovered,
+          processed: processedCount,
+          total: totalFiles,
           currentFile: p.basename(file.path),
           phase: _stageToPhase(result.stage),
         );
 
         // 让出时间片，避免阻塞UI
-        if (stats.totalDiscovered % 10 == 0) {
+        if (processedCount % 10 == 0) {
           await Future.delayed(Duration.zero);
         }
       }
@@ -501,6 +500,34 @@ class GalleryStreamScanner {
         }
       }
     }
+  }
+
+  /// 统计总文件数（预扫描）
+  /// 
+  /// 在开始处理前先遍历一遍目录，统计总文件数
+  /// 这样可以让用户看到固定的进度（如 0/8751 → 8751/8751）
+  Future<int> _countTotalFiles(Directory rootDir) async {
+    const supportedExtensions = ['.png', '.jpg', '.jpeg', '.webp'];
+    var count = 0;
+    
+    await for (final entity in rootDir.list(recursive: true, followLinks: false)) {
+      if (_shouldCancel) break;
+      
+      if (entity is File) {
+        // 跳过缩略图
+        if (entity.path.contains('${Platform.pathSeparator}.thumbs${Platform.pathSeparator}') ||
+            entity.path.contains('.thumb.')) {
+          continue;
+        }
+        
+        final ext = p.extension(entity.path).toLowerCase();
+        if (supportedExtensions.contains(ext)) {
+          count++;
+        }
+      }
+    }
+    
+    return count;
   }
 
   /// 转换阶段到 ScanPhase
