@@ -24,7 +24,8 @@ class GalleryScanProgressPanel extends ConsumerWidget {
 
     final stats = scanState.cacheStats;
     final progress = scanState.progress;
-    final percentage = (stats.coverage * 100).toStringAsFixed(1);
+    // 使用处理进度百分比（processed/total），而非覆盖率
+    final percentage = (progress * 100).toStringAsFixed(1);
 
     return Container(
       margin: const EdgeInsets.all(12),
