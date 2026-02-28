@@ -194,24 +194,26 @@ class _ThumbnailCropDialogState extends State<ThumbnailCropDialog> {
             Flexible(
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // 预览区域说明
-                    _buildPreviewLabel(theme, l10n),
-                    const SizedBox(height: 12),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 预览区域说明
+                      _buildPreviewLabel(theme, l10n),
+                      const SizedBox(height: 12),
 
-                    // 调整区域（使用 AspectRatio 保持与 EntryCard 一致的比例）
-                    _buildAdjustArea(),
-                    const SizedBox(height: 16),
+                      // 调整区域（使用 AspectRatio 保持与 EntryCard 一致的比例）
+                      _buildAdjustArea(),
+                      const SizedBox(height: 16),
 
-                    // 实时预览（显示调整后的效果）
-                    _buildLivePreview(theme, l10n),
-                    const SizedBox(height: 16),
+                      // 实时预览（显示调整后的效果）
+                      _buildLivePreview(theme, l10n),
+                      const SizedBox(height: 16),
 
-                    // 缩放控制
-                    _buildScaleControl(theme),
-                  ],
+                      // 缩放控制
+                      _buildScaleControl(theme),
+                    ],
+                  ),
                 ),
               ),
             ),

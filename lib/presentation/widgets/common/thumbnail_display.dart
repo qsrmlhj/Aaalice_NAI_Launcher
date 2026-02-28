@@ -52,8 +52,8 @@ class ThumbnailDisplay extends StatelessWidget {
     Widget image = Image.file(
       File(imagePath),
       fit: fit,
-      width: width != null ? width! * effectiveScale : null,
-      height: height != null ? height! * effectiveScale : null,
+      width: (width != null && width!.isFinite) ? width! * effectiveScale : null,
+      height: (height != null && height!.isFinite) ? height! * effectiveScale : null,
       errorBuilder: (context, error, stackTrace) {
         return _buildErrorPlaceholder();
       },
