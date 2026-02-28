@@ -8,6 +8,7 @@ import '../../../../core/utils/localization_extension.dart';
 import '../../../../data/models/tag_library/tag_library_entry.dart';
 import '../../../widgets/common/app_toast.dart';
 import '../../../widgets/common/themed_divider.dart';
+import '../../../widgets/common/thumbnail_display.dart';
 
 /// 词库条目卡片 - 名称居中 + 互斥显示
 ///
@@ -322,11 +323,15 @@ class _EntryCardState extends State<EntryCard>
 
   /// 构建背景图片
   Widget _buildBackgroundImage(TagLibraryEntry entry) {
-    if (entry.hasThumbnail) {
-      return Image.file(
-        File(entry.thumbnail!),
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _buildPlaceholder(),
+    if (entry.hasThumbnail && entry.thumbnail != null) {
+      return ThumbnailDisplay(
+        imagePath: entry.thumbnail!,
+        offsetX: entry.thumbnailOffsetX,
+        offsetY: entry.thumbnailOffsetY,
+        scale: entry.thumbnailScale,
+        width: double.infinity,
+        height: double.infinity,
+        borderRadius: BorderRadius.circular(12),
       );
     }
     return _buildPlaceholder();
