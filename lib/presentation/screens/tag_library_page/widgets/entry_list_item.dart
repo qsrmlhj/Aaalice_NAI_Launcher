@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../../../core/utils/localization_extension.dart';
 import '../../../../data/models/tag_library/tag_library_entry.dart';
 import '../../../widgets/common/app_toast.dart';
+import '../../../widgets/common/thumbnail_display.dart';
 
 /// 词库条目列表项
 class EntryListItem extends StatefulWidget {
@@ -220,34 +221,30 @@ class _EntryListItemState extends State<EntryListItem> {
         child: Row(
           children: [
             // 缩略图
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(
+            if (entry.hasThumbnail && entry.thumbnail != null)
+              ThumbnailDisplay(
+                imagePath: entry.thumbnail!,
+                offsetX: entry.thumbnailOffsetX,
+                offsetY: entry.thumbnailOffsetY,
+                scale: entry.thumbnailScale,
                 width: 48,
                 height: 48,
-                child: entry.hasThumbnail
-                    ? Image.file(
-                        File(entry.thumbnail!),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          color: theme.colorScheme.surfaceContainerHighest,
-                          child: Icon(
-                            Icons.image_outlined,
-                            size: 20,
-                            color: theme.colorScheme.outline,
-                          ),
-                        ),
-                      )
-                    : Container(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        child: Icon(
-                          Icons.library_books,
-                          size: 20,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
+                borderRadius: BorderRadius.circular(6),
+              )
+            else
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(
+                  Icons.library_books,
+                  size: 20,
+                  color: theme.colorScheme.primary,
+                ),
               ),
-            ),
             const SizedBox(width: 12),
             // 信息
             Expanded(
@@ -291,21 +288,18 @@ class _EntryListItemState extends State<EntryListItem> {
   }
 
   Widget _buildThumbnail(ThemeData theme, TagLibraryEntry entry) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: SizedBox(
+    if (entry.hasThumbnail && entry.thumbnail != null) {
+      return ThumbnailDisplay(
+        imagePath: entry.thumbnail!,
+        offsetX: entry.thumbnailOffsetX,
+        offsetY: entry.thumbnailOffsetY,
+        scale: entry.thumbnailScale,
         width: 64,
         height: 64,
-        child: entry.hasThumbnail
-            ? Image.file(
-                File(entry.thumbnail!),
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stack) =>
-                    _buildPlaceholder(theme),
-              )
-            : _buildPlaceholder(theme),
-      ),
-    );
+        borderRadius: BorderRadius.circular(8),
+      );
+    }
+    return _buildPlaceholder(theme);
   }
 
   Widget _buildPlaceholder(ThemeData theme) {
