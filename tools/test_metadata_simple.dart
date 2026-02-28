@@ -96,8 +96,11 @@ SimpleMetadataResult extractMetadata(String filePath) {
     String? source;
     if (hasComment) {
       source = 'Comment';
-    } else if (hasParameters) source = 'parameters';
-    else if (hasNai) source = 'nai/novelai';
+    } else if (hasParameters) {
+      source = 'parameters';
+    } else if (hasNai) {
+      source = 'nai/novelai';
+    }
 
     // 尝试提取prompt
     String? prompt;

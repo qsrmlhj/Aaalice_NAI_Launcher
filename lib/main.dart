@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -245,6 +246,9 @@ void setupWindowsWakeUpChannel() {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 初始化 Semantics 以避免 Windows 桌面端的 accessibility_bridge 错误刷屏
+  SemanticsBinding.instance.ensureSemantics();
 
   // 初始化日志系统（必须在其他操作之前）
   await AppLogger.initialize(isTestEnvironment: false);

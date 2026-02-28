@@ -477,12 +477,14 @@ class GalleryStreamScanner {
       // 【新增】处理移动/重命名：直接更新路径，不重新提取元数据
       if (isMoved) {
         final oldImageId = _pathToId[movedFromPath];
-        if (oldImageId != null) {
+        // 【修复】检查目标路径是否已存在于数据库中，避免 UNIQUE 约束冲突
+        final targetPathExists = _existingMap.containsKey(path);
+        if (oldImageId != null && !targetPathExists) {
           AppLogger.d(
             '[StreamScan] Detected move/rename: $movedFromPath -> $path',
             'GalleryStreamScanner',
           );
-          
+
           // 更新文件路径
           await _dataSource.updateFilePath(oldImageId, path, newFileName: fileName);
           
