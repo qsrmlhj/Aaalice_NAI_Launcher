@@ -103,15 +103,22 @@
 
 **Depends on:** Phase 3
 
-**Status:** 3/5 plans completed
+**Status:** 5/5 plans completed
 
 | Plan | Wave | Description | Status |
 |------|------|-------------|--------|
 | PLAN-01 | 1 | 数据模型扩展 - TagLibraryEntry 添加 offset/scale 字段 | ✅ 完成 |
 | PLAN-02 | 2 | 调整对话框实现 - 使用 InteractiveViewer 实现调整界面 | ✅ 完成 |
 | PLAN-03 | 3 | 编辑对话框集成 - 添加调整入口和实时预览 | ✅ 完成 |
-| PLAN-04 | 4 | EntryCard 和悬浮预览集成 - 应用显示范围设置 | Ready |
-| PLAN-05 | 5 | 本地化与测试验证 - 添加本地化字符串，运行分析验证 | Ready |
+| PLAN-04 | 4 | EntryCard 和悬浮预览集成 - 应用显示范围设置 | ✅ 完成 |
+| PLAN-05 | 5 | 本地化与测试验证 - 添加本地化字符串，运行分析验证 | ✅ 完成 |
+
+**完成总结**:
+- 添加 9 个本地化键值（中英文）
+- flutter analyze: 零错误
+- dart fix: 无需要修复的问题
+- 创建组件导出索引文件
+- 285 个测试通过（11 个预先存在的失败）
 
 **实现决策**:
 - 调整方式: 拖拽平移 + 缩放（使用 Flutter 原生 InteractiveViewer）
