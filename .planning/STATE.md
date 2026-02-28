@@ -29,7 +29,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: 稳定版
 status: active
-last_updated: "2026-02-28T23:05:00Z"
+last_updated: "2026-02-28T23:15:00Z"
 progress:
   total_phases: 3
   completed_phases: 2
@@ -113,3 +113,4 @@ progress:
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 1 | 全局安装 cameroncooke/cameroncooke-skills skill | 2026-02-28 | - | [1-cameroncooke-cameroncooke-skills-skill](./quick/1-cameroncooke-cameroncooke-skills-skill/) |
+| 2 | 词库卡片的悬浮按钮需要悬浮动效和悬浮提示 | 2026-02-28 | - | [002-tag-card-fab-effects](./quick/002-tag-card-fab-effects/) |

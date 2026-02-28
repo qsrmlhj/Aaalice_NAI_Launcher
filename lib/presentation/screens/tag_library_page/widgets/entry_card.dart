@@ -344,6 +344,7 @@ class _EntryCardState extends State<EntryCard>
 
   /// 构建内容区域（名称和按钮互斥显示）
   Widget _buildContentArea(ThemeData theme, TagLibraryEntry entry) {
+    final l10n = context.l10n;
     // 悬浮时显示按钮，否则显示名称
     if (_isHovering) {
       return Container(
@@ -354,6 +355,7 @@ class _EntryCardState extends State<EntryCard>
             children: [
               _ActionIcon(
                 icon: Icons.delete_outline,
+                tooltip: l10n.common_delete,
                 onTap: widget.onDelete,
                 isDestructive: true,
               ),
@@ -361,17 +363,20 @@ class _EntryCardState extends State<EntryCard>
               if (widget.onEdit != null)
                 _ActionIcon(
                   icon: Icons.edit_outlined,
+                  tooltip: l10n.common_edit,
                   onTap: widget.onEdit!,
                 ),
               if (widget.onEdit != null) const SizedBox(width: 8),
               _ActionIcon(
                 icon: entry.isFavorite ? Icons.favorite : Icons.favorite_border,
+                tooltip: entry.isFavorite ? l10n.common_unfavorite : l10n.common_favorite,
                 onTap: widget.onToggleFavorite,
                 color: entry.isFavorite ? Colors.redAccent : null,
               ),
               const SizedBox(width: 8),
               _ActionIcon(
                 icon: Icons.content_copy,
+                tooltip: l10n.common_copy,
                 onTap: () => _copyToClipboard(entry.content),
               ),
             ],
@@ -517,34 +522,69 @@ class _EntryCardState extends State<EntryCard>
   }
 }
 
-/// 操作图标按钮
-class _ActionIcon extends StatelessWidget {
+/// 操作图标按钮（带悬浮动效和Tooltip）
+class _ActionIcon extends StatefulWidget {
   final IconData icon;
   final VoidCallback onTap;
   final bool isDestructive;
   final Color? color;
+  final String tooltip;
 
   const _ActionIcon({
     required this.icon,
     required this.onTap,
+    required this.tooltip,
     this.isDestructive = false,
     this.color,
   });
 
   @override
+  State<_ActionIcon> createState() => _ActionIconState();
+}
+
+class _ActionIconState extends State<_ActionIcon> {
+  bool _isHovering = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withOpacity(0.15),
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Icon(
-            icon,
-            size: 20,
-            color: color ?? (isDestructive ? Colors.redAccent : Colors.white),
+    final bgColor = Colors.white.withOpacity(0.15);
+    final hoverBgColor = Colors.white.withOpacity(0.35);
+
+    return Tooltip(
+      message: widget.tooltip,
+      waitDuration: const Duration(milliseconds: 300),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovering = true),
+        onExit: (_) => setState(() => _isHovering = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          behavior: HitTestBehavior.opaque,
+          child: AnimatedScale(
+            duration: const Duration(milliseconds: 150),
+            scale: _isHovering ? 1.15 : 1.0,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _isHovering ? hoverBgColor : bgColor,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: _isHovering
+                    ? [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.4),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Icon(
+                widget.icon,
+                size: 20,
+                color: widget.color ??
+                    (widget.isDestructive ? Colors.redAccent : Colors.white),
+              ),
+            ),
           ),
         ),
       ),
