@@ -507,7 +507,7 @@ class _EntryAddDialogState extends ConsumerState<EntryAddDialog> {
           children: [
             ListTile(
               leading: const Icon(Icons.image),
-              title: const Text('选择新图片'),
+              title: Text(context.l10n.tagLibrary_selectNewImage),
               onTap: () {
                 Navigator.pop(context);
                 _selectThumbnail();
@@ -515,7 +515,7 @@ class _EntryAddDialogState extends ConsumerState<EntryAddDialog> {
             ),
             ListTile(
               leading: const Icon(Icons.crop_free),
-              title: const Text('调整显示范围'),
+              title: Text(context.l10n.tagLibrary_adjustDisplayRange),
               onTap: () {
                 Navigator.pop(context);
                 _openCropDialog();

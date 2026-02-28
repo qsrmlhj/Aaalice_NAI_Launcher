@@ -241,7 +241,7 @@ class _ThumbnailCropDialogState extends State<ThumbnailCropDialog> {
           ),
           const SizedBox(width: 12),
           Text(
-            '调整预览图显示范围',
+            l10n.tagLibrary_adjustThumbnailTitle,
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w600,
             ),
@@ -269,7 +269,7 @@ class _ThumbnailCropDialogState extends State<ThumbnailCropDialog> {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            '拖拽移动，滚轮或双指缩放',
+            l10n.tagLibrary_dragToMove,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.outline,
             ),
@@ -340,7 +340,7 @@ class _ThumbnailCropDialogState extends State<ThumbnailCropDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '实时预览',
+            l10n.tagLibrary_livePreview,
             style: theme.textTheme.bodySmall?.copyWith(
               fontWeight: FontWeight.w500,
               color: theme.colorScheme.onSurfaceVariant,
@@ -371,17 +371,17 @@ class _ThumbnailCropDialogState extends State<ThumbnailCropDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildValueRow(
-                      '水平偏移',
+                      l10n.tagLibrary_horizontalOffset,
                       (_currentScale > 1.0 ? _controller.value.getTranslation().x / (100 * (_currentScale - 1.0)) : 0.0).toStringAsFixed(2),
                     ),
                     const SizedBox(height: 4),
                     _buildValueRow(
-                      '垂直偏移',
+                      l10n.tagLibrary_verticalOffset,
                       (_currentScale > 1.0 ? _controller.value.getTranslation().y / (100 * (_currentScale - 1.0)) : 0.0).toStringAsFixed(2),
                     ),
                     const SizedBox(height: 4),
                     _buildValueRow(
-                      '缩放比例',
+                      l10n.tagLibrary_zoomRatio,
                       '${_currentScale.toStringAsFixed(2)}x',
                     ),
                   ],
@@ -513,7 +513,7 @@ class _ThumbnailCropDialogState extends State<ThumbnailCropDialog> {
           TextButton.icon(
             onPressed: _reset,
             icon: const Icon(Icons.restart_alt),
-            label: const Text('重置'),
+            label: Text(l10n.common_reset),
           ),
           const SizedBox(width: 8),
           // 取消按钮
