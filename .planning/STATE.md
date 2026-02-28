@@ -37,6 +37,11 @@ progress:
 - 视图切换方案: 3 状态（列表/网格/分组）
 - 分组视图设为默认
 
+## Bug Fixes
+- **2026-02-28**: 修复 `CategoryHeaderDelegate` SliverGeometry 错误 (`layoutExtent > paintExtent`)
+  - Root Cause: build() 返回的 widget 高度 (34-36px) 小于 maxExtent (40px)
+  - Fix: 使用 SizedBox(height: maxExtent) 强制高度一致
+
 ## Notes
 - 词库功能已有良好基础，添加分组视图相对简单
 - 图像解析稳定性需要诊断后确定具体修复方案
