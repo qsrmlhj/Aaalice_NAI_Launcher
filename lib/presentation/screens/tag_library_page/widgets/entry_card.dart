@@ -747,18 +747,16 @@ class _EntryPreviewOverlay extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // 预览图
-                      if (entry.hasThumbnail)
-                        ClipRRect(
+                      if (entry.hasThumbnail && entry.thumbnail != null)
+                        ThumbnailDisplay(
+                          imagePath: entry.thumbnail!,
+                          offsetX: entry.thumbnailOffsetX,
+                          offsetY: entry.thumbnailOffsetY,
+                          scale: entry.thumbnailScale,
+                          width: previewWidth,
+                          height: 180,
                           borderRadius: const BorderRadius.vertical(
                             top: Radius.circular(16),
-                          ),
-                          child: Image.file(
-                            File(entry.thumbnail!),
-                            width: previewWidth,
-                            height: 180,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stack) =>
-                                const SizedBox.shrink(),
                           ),
                         ),
 
