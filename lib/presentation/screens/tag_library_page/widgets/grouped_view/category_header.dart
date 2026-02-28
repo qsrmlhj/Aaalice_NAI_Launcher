@@ -12,12 +12,14 @@ class CategoryHeaderDelegate extends SliverPersistentHeaderDelegate {
     final theme = Theme.of(context);
     final isPinned = shrinkOffset > 0 || overlapsContent;
 
-    return Container(
-      color: isPinned
-          ? theme.colorScheme.surfaceContainerHighest
-          : theme.colorScheme.surfaceContainerLow,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
+    return SizedBox(
+      height: maxExtent,
+      child: Container(
+        color: isPinned
+            ? theme.colorScheme.surfaceContainerHighest
+            : theme.colorScheme.surfaceContainerLow,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 200),
@@ -61,6 +63,7 @@ class CategoryHeaderDelegate extends SliverPersistentHeaderDelegate {
             ),
           ),
         ],
+      ),
       ),
     );
   }
