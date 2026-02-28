@@ -143,6 +143,7 @@ class _ShortcutBindingEditorState
 
   Widget _buildFullEditor(ThemeData theme) {
     return Focus(
+      autofocus: true,
       onKeyEvent: _isRecording ? _handleKeyEvent : null,
       child: Column(
         mainAxisSize: MainAxisSize.min,

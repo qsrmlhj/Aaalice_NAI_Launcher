@@ -129,22 +129,28 @@ class _ShortcutAwareWidgetState extends ConsumerState<ShortcutAwareWidget> {
       return widget.child;
     }
 
-    // 使用 CallbackShortcuts + FocusScope 确保快捷键在子组件获得焦点时也能工作
-    return CallbackShortcuts(
-      bindings: shortcutsMap.map((keySet, intent) =>
-        MapEntry(
-          keySet,
-          () {
-            if (intent is _ShortcutIntent) {
-              final callback = widget.shortcuts[intent.shortcutId];
-              callback?.call();
-            }
-          },
-        ),
+    // 构建 Actions Map - 只需要注册一次 _ShortcutIntent 的处理
+    final actionsMap = <Type, Action<Intent>>{
+      _ShortcutIntent: CallbackAction<_ShortcutIntent>(
+        onInvoke: (intent) {
+          final callback = widget.shortcuts[intent.shortcutId];
+          callback?.call();
+          return null;
+        },
       ),
-      child: FocusScope(
-        autofocus: widget.autofocus,
-        child: widget.child,
+    };
+
+    // 使用 Shortcuts + Actions + Focus 确保快捷键在整个子树中都能工作
+    // 即使子组件（如 TextField）获得焦点，快捷键也能正常触发
+    return Shortcuts(
+      shortcuts: shortcutsMap,
+      child: Actions(
+        actions: actionsMap,
+        child: Focus(
+          autofocus: widget.autofocus,
+          skipTraversal: true, // 不参与焦点遍历，只作为快捷键的锚点
+          child: widget.child,
+        ),
       ),
     );
   }
@@ -201,22 +207,27 @@ class _ShortcutAwareWidgetState extends ConsumerState<ShortcutAwareWidget> {
       return widget.child;
     }
 
-    // 使用 CallbackShortcuts + FocusScope 确保快捷键在子组件获得焦点时也能工作
-    return CallbackShortcuts(
-      bindings: shortcutsMap.map((keySet, intent) =>
-        MapEntry(
-          keySet,
-          () {
-            if (intent is _ShortcutIntent) {
-              final callback = widget.shortcuts[intent.shortcutId];
-              callback?.call();
-            }
-          },
-        ),
+    // 构建 Actions Map - 只需要注册一次 _ShortcutIntent 的处理
+    final actionsMap = <Type, Action<Intent>>{
+      _ShortcutIntent: CallbackAction<_ShortcutIntent>(
+        onInvoke: (intent) {
+          final callback = widget.shortcuts[intent.shortcutId];
+          callback?.call();
+          return null;
+        },
       ),
-      child: FocusScope(
-        autofocus: widget.autofocus,
-        child: widget.child,
+    };
+
+    // 使用 Shortcuts + Actions + Focus 确保快捷键在整个子树中都能工作
+    return Shortcuts(
+      shortcuts: shortcutsMap,
+      child: Actions(
+        actions: actionsMap,
+        child: Focus(
+          autofocus: widget.autofocus,
+          skipTraversal: true,
+          child: widget.child,
+        ),
       ),
     );
   }

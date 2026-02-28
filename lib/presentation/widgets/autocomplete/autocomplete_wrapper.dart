@@ -720,12 +720,15 @@ class _AutocompleteWrapperState extends ConsumerState<AutocompleteWrapper> {
     }
 
     // 使用 Focus widget 拦截键盘事件
+    // 只在补全菜单显示时注册 onKeyEvent，避免干扰系统快捷键（如 Win+V）
     return CompositedTransformTarget(
       link: _layerLink,
       child: Focus(
         skipTraversal: true,
         canRequestFocus: false,
-        onKeyEvent: (node, event) => _handleKeyEvent(node, event),
+        onKeyEvent: _showSuggestions
+            ? (node, event) => _handleKeyEvent(node, event)
+            : null,
         child: widget.child,
       ),
     );
