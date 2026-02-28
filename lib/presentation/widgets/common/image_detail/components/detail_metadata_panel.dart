@@ -7,9 +7,11 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../../../../../core/utils/app_logger.dart';
 import '../../../../../core/utils/localization_extension.dart';
 import '../../../../../data/models/gallery/nai_image_metadata.dart';
+import '../../../../../data/models/vibe/vibe_reference.dart';
 import '../../add_to_library_dialog.dart';
 import '../../app_toast.dart';
 import '../../save_as_preset_dialog.dart';
+import '../../save_vibe_dialog.dart';
 import '../../themed_divider.dart';
 import '../file_image_detail_data.dart';
 import '../image_detail_data.dart';
@@ -619,9 +621,12 @@ class _MetadataContent extends StatelessWidget {
   }
 
   /// 显示保存 Vibe 对话框
-  void _showSaveVibeDialog(BuildContext context, vibe) {
-    // TODO: 实现保存 Vibe 对话框（需要 VibeLibraryService）
-    AppToast.info(context, '保存到 Vibe 库功能即将推出');
+  Future<void> _showSaveVibeDialog(BuildContext context, VibeReference vibe) async {
+    await SaveVibeDialog.show(
+      context,
+      vibe: vibe,
+      defaultName: vibe.displayName,
+    );
   }
 
   String _formatTime(BuildContext context, DateTime time) {
