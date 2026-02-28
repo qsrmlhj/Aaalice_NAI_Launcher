@@ -32,15 +32,13 @@ class CategoryHeaderDelegate extends SliverPersistentHeaderDelegate {
             ),
           ),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              title,
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: isPinned
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.onSurface,
-              ),
+          Text(
+            title,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: isPinned
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurface,
             ),
           ),
           Container(
