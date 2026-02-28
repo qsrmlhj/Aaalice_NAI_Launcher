@@ -314,7 +314,7 @@ class _AddToLibraryDialogState extends ConsumerState<AddToLibraryDialog> {
                         return DropdownMenuItem(
                           value: category.name,
                           child: Text(
-                              TagSubCategoryHelper.getDisplayName(category)),
+                              TagSubCategoryHelper.getDisplayName(category),),
                         );
                       }),
                     ],

@@ -82,23 +82,23 @@ class _DetailMetadataPanelState extends State<DetailMetadataPanel> {
     final image = widget.currentImage;
     if (image == null) {
       AppLogger.w('[MetadataFlow] _startMetadataLoading: image is null',
-          'DetailMetadataPanel');
+          'DetailMetadataPanel',);
       return;
     }
 
     AppLogger.i(
         '[MetadataFlow] _startMetadataLoading: identifier=${image.identifier}, type=${image.runtimeType}',
-        'DetailMetadataPanel');
+        'DetailMetadataPanel',);
 
     // 1. 先检查同步可用的元数据
     final syncMetadata = image.metadata;
     AppLogger.d(
         '[MetadataFlow] syncMetadata check: hasData=${syncMetadata?.hasData}, has prompt="${syncMetadata?.fullPrompt.isNotEmpty == true}"',
-        'DetailMetadataPanel');
+        'DetailMetadataPanel',);
 
     if (syncMetadata != null && syncMetadata.hasData) {
       AppLogger.i('[MetadataFlow] Using sync metadata (cache hit)',
-          'DetailMetadataPanel');
+          'DetailMetadataPanel',);
       _loadedMetadata = syncMetadata;
       _metadataFuture = null;
       return;
@@ -106,39 +106,39 @@ class _DetailMetadataPanelState extends State<DetailMetadataPanel> {
 
     // 2. 异步加载元数据（支持所有数据源）
     AppLogger.i('[MetadataFlow] Cache miss, starting async load...',
-        'DetailMetadataPanel');
+        'DetailMetadataPanel',);
     Future<NaiImageMetadata?>? future;
     if (image is FileImageDetailData) {
       AppLogger.d('[MetadataFlow] Using FileImageDetailData.getMetadataAsync()',
-          'DetailMetadataPanel');
+          'DetailMetadataPanel',);
       future = image.getMetadataAsync();
     } else if (image is GeneratedImageDetailData) {
       AppLogger.d(
           '[MetadataFlow] Using GeneratedImageDetailData.getMetadataAsync()',
-          'DetailMetadataPanel');
+          'DetailMetadataPanel',);
       future = image.getMetadataAsync();
     } else if (image is LocalImageDetailData) {
       AppLogger.d(
           '[MetadataFlow] Using LocalImageDetailData.getMetadataAsync()',
-          'DetailMetadataPanel');
+          'DetailMetadataPanel',);
       future = image.getMetadataAsync();
     } else {
       AppLogger.w('[MetadataFlow] Unknown image type: ${image.runtimeType}',
-          'DetailMetadataPanel');
+          'DetailMetadataPanel',);
     }
 
     if (future != null) {
       _metadataFuture = future.then((metadata) {
         AppLogger.i(
             '[MetadataFlow] Async load completed: hasData=${metadata?.hasData}, prompt length=${metadata?.fullPrompt.length ?? 0}',
-            'DetailMetadataPanel');
+            'DetailMetadataPanel',);
         if (mounted) {
           setState(() => _loadedMetadata = metadata);
         }
         return metadata;
       }).catchError((e, stack) {
         AppLogger.e('[MetadataFlow] Async load failed', e, stack,
-            'DetailMetadataPanel');
+            'DetailMetadataPanel',);
         throw e;
       });
     } else {
@@ -417,27 +417,27 @@ class _MetadataContent extends StatelessWidget {
             if (metadata.model != null)
               _InfoRow(
                   label: context.l10n.gallery_metaModel,
-                  value: metadata.model!),
+                  value: metadata.model!,),
             if (metadata.seed != null)
               _InfoRow(
                   label: context.l10n.gallery_metaSeed,
-                  value: metadata.seed.toString()),
+                  value: metadata.seed.toString(),),
             if (metadata.steps != null)
               _InfoRow(
                   label: context.l10n.gallery_metaSteps,
-                  value: metadata.steps.toString()),
+                  value: metadata.steps.toString(),),
             if (metadata.scale != null)
               _InfoRow(
                   label: context.l10n.gallery_metaCfgScale,
-                  value: metadata.scale.toString()),
+                  value: metadata.scale.toString(),),
             if (metadata.sampler != null)
               _InfoRow(
                   label: context.l10n.gallery_metaSampler,
-                  value: metadata.displaySampler),
+                  value: metadata.displaySampler,),
             if (metadata.sizeString.isNotEmpty)
               _InfoRow(
                   label: context.l10n.gallery_metaResolution,
-                  value: metadata.sizeString),
+                  value: metadata.sizeString,),
             if (metadata.smea == true || metadata.smeaDyn == true)
               _InfoRow(
                 label: context.l10n.gallery_metaSmea,
@@ -517,7 +517,7 @@ class _MetadataContent extends StatelessWidget {
               initiallyExpanded: false,
               showAddToLibrary: true,
               onAddToLibrary: () => _showAddToLibraryDialog(
-                  context, metadata.qualityTags.join(', ')),
+                  context, metadata.qualityTags.join(', '),),
             ),
           ],
           // 角色提示词详细卡片
@@ -646,7 +646,7 @@ class _MetadataContent extends StatelessWidget {
 
   /// 显示添加到词库对话框
   Future<void> _showAddToLibraryDialog(
-      BuildContext context, String content) async {
+      BuildContext context, String content,) async {
     await AddToLibraryDialog.show(
       context,
       content: content,
@@ -656,7 +656,7 @@ class _MetadataContent extends StatelessWidget {
 
   /// 显示保存 Vibe 对话框
   Future<void> _showSaveVibeDialog(
-      BuildContext context, VibeReference vibe) async {
+      BuildContext context, VibeReference vibe,) async {
     await SaveVibeDialog.show(
       context,
       vibe: vibe,
@@ -811,7 +811,7 @@ class _ActionButtons extends StatelessWidget {
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: metadata.fullPrompt));
                     AppToast.success(
-                        context, context.l10n.gallery_promptCopied);
+                        context, context.l10n.gallery_promptCopied,);
                   },
                 ),
               ),
@@ -826,7 +826,7 @@ class _ActionButtons extends StatelessWidget {
                         ClipboardData(text: metadata.seed.toString()),
                       );
                       AppToast.success(
-                          context, context.l10n.gallery_seedCopied);
+                          context, context.l10n.gallery_seedCopied,);
                     },
                   ),
                 ),
