@@ -371,8 +371,8 @@ class _TagLibraryPageScreenState extends ConsumerState<TagLibraryPageScreen> {
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 280,
-        childAspectRatio: 0.85,
+        maxCrossAxisExtent: 240,
+        mainAxisExtent: 80,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
       ),
