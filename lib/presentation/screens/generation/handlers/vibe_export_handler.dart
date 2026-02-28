@@ -330,10 +330,8 @@ class VibeExportHandler {
     String targetImagePath,
     List<VibeReference> vibes,
   ) async {
-    // TODO(已知问题): 实现实际的嵌入逻辑
-    // 这需要使用 vibe_image_embedder.dart 中的功能
-    // 目前仅显示占位提示，实际功能将在后续 PR 中实现
-    // 相关 Issue: 嵌入 Vibe 数据到 PNG 图片的 iTXt 元数据
+    // 注意：PNG iTXt 元数据嵌入功能暂不实现
+    // 当前使用 .naiv4vibe 文件作为替代方案
 
     AppLogger.i(
       'Embedding ${vibes.length} vibes into $targetImagePath',
