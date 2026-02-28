@@ -114,7 +114,7 @@ class DragTargetWrapper extends ConsumerWidget {
 
   /// 构建空状态 - 双卡片并排布局：从文件添加 + 从库导入
   Widget _buildEmptyState(
-      BuildContext context, WidgetRef ref, ThemeData theme) {
+      BuildContext context, WidgetRef ref, ThemeData theme,) {
     return Row(
       children: [
         // 从文件添加
@@ -170,12 +170,12 @@ class DragTargetWrapper extends ConsumerWidget {
 
   /// 从文件添加 Vibe（供外部调用）
   static Future<void> addVibeFromFile(
-      BuildContext context, WidgetRef ref) async {
+      BuildContext context, WidgetRef ref,) async {
     await _addVibeStatic(context, ref);
   }
 
   static Future<void> _addVibeStatic(
-      BuildContext context, WidgetRef ref) async {
+      BuildContext context, WidgetRef ref,) async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -295,13 +295,13 @@ class DragTargetWrapper extends ConsumerWidget {
   }
 
   static Widget _buildEncodingDialogStatic(
-      BuildContext context, String fileName) {
+      BuildContext context, String fileName,) {
     return _buildEncodingDialogInternal(
-        context, fileName, AppLocalizations.of(context)!, Theme.of(context));
+        context, fileName, AppLocalizations.of(context)!, Theme.of(context),);
   }
 
   static Widget _buildEncodingDialogInternal(BuildContext context,
-      String fileName, AppLocalizations l10n, ThemeData theme) {
+      String fileName, AppLocalizations l10n, ThemeData theme,) {
     var encodeChecked = true;
     var autoSaveChecked = true;
 

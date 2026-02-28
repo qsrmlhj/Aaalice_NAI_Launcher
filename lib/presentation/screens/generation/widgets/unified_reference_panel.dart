@@ -166,7 +166,7 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
 
     if (mounted) {
       AppToast.success(
-          context, '${entry.displayName} ${context.l10n.common_added}');
+          context, '${entry.displayName} ${context.l10n.common_added}',);
     }
   }
 

@@ -53,7 +53,7 @@ class _DesktopGenerationLayoutState
       if (isDocked) {
         ref.read(characterPanelDockProvider.notifier).undock();
         AppLogger.d(
-            'Auto-undocked character panel on maximize', 'DesktopLayout');
+            'Auto-undocked character panel on maximize', 'DesktopLayout',);
       }
     }
 

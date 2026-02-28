@@ -125,7 +125,7 @@ class GenerationSaveService {
 
   /// 从元数据构建 Comment JSON
   static Map<String, dynamic> buildCommentJsonFromMetadata(
-      NaiImageMetadata metadata) {
+      NaiImageMetadata metadata,) {
     final commentJson = <String, dynamic>{
       'prompt': metadata.prompt,
       'uc': metadata.negativePrompt,

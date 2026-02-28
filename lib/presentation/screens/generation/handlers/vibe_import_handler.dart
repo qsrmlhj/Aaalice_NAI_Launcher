@@ -124,7 +124,7 @@ class VibeImportHandler {
               if (context.mounted) {
                 AppLogger.e('Failed to parse file: $fileName', e, null, _tag);
                 AppToast.error(
-                    context, context.l10n.vibe_import_fileParseFailed);
+                    context, context.l10n.vibe_import_fileParseFailed,);
               }
             }
           }
@@ -475,7 +475,7 @@ class VibeImportHandler {
       }
     } catch (e, stackTrace) {
       AppLogger.e(
-          'Failed to save encoded vibes to library', e, stackTrace, _tag);
+          'Failed to save encoded vibes to library', e, stackTrace, _tag,);
       if (context.mounted) {
         AppToast.error(context, context.l10n.vibe_saveToLibrary_saveFailed);
       }
