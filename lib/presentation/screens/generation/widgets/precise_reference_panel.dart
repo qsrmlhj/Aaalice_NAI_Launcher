@@ -177,8 +177,6 @@ class _PreciseReferencePanelState extends ConsumerState<PreciseReferencePanel> {
             ),
             const SizedBox(height: 12),
 
-
-
             // 参考列表
             if (hasReferences) ...[
               ...List.generate(references.length, (index) {

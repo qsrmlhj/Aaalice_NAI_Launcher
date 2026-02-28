@@ -149,7 +149,9 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
       final handler = VibeImportHandler(ref: ref, context: context);
       final added = await handler.extractAndAddBundleVibes(entry);
       if (added > 0) {
-        await ref.read(vibeLibraryStorageServiceProvider).incrementUsedCount(entry.id);
+        await ref
+            .read(vibeLibraryStorageServiceProvider)
+            .incrementUsedCount(entry.id);
       }
       return;
     }
@@ -163,7 +165,8 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
     await storageService.incrementUsedCount(entry.id);
 
     if (mounted) {
-      AppToast.success(context, '${entry.displayName} ${context.l10n.common_added}');
+      AppToast.success(
+          context, '${entry.displayName} ${context.l10n.common_added}');
     }
   }
 

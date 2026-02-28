@@ -2,7 +2,7 @@
 //
 // 此文件导出所有桌面端布局相关的组件。
 
-export 'batch_settings_sheet.dart';
+// export 'batch_settings_sheet.dart';  // 文件不存在，暂时注释
 export 'character_panel.dart';
 export 'collapsed_panel.dart';
 export 'drag_target_wrapper.dart';
@@ -18,7 +18,7 @@ export 'prompt_input.dart';
 export 'prompt_tooltip_components.dart';
 export 'recent_vibe_item.dart';
 export 'recent_vibes_list.dart';
-export 'recent_vibes_section.dart';
+// export 'recent_vibes_section.dart';  // 与 recent_vibe_item.dart 有类名冲突 (RecentVibeItem)
 export 'resize_handle.dart';
 export 'unified_reference_panel.dart';
 export 'upscale_dialog.dart';

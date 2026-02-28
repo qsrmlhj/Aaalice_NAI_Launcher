@@ -123,7 +123,8 @@ class VibeImportHandler {
             } catch (e) {
               if (context.mounted) {
                 AppLogger.e('Failed to parse file: $fileName', e, null, _tag);
-                AppToast.error(context, context.l10n.vibe_import_fileParseFailed);
+                AppToast.error(
+                    context, context.l10n.vibe_import_fileParseFailed);
               }
             }
           }
@@ -140,7 +141,8 @@ class VibeImportHandler {
   }
 
   /// 显示编码确认对话框
-  Future<(bool confirmed, bool encode, bool autoSave)?> _showEncodingConfirmDialog(
+  Future<(bool confirmed, bool encode, bool autoSave)?>
+      _showEncodingConfirmDialog(
     String fileName,
   ) async {
     final l10n = context.l10n;
@@ -153,8 +155,9 @@ class VibeImportHandler {
         return StatefulBuilder(
           builder: (context, setState) {
             // 根据勾选状态动态确定按钮文本
-            final confirmButtonText =
-                encodeChecked ? l10n.vibe_import_encodeNow : l10n.vibe_addImageOnly;
+            final confirmButtonText = encodeChecked
+                ? l10n.vibe_import_encodeNow
+                : l10n.vibe_addImageOnly;
 
             return AlertDialog(
               title: Text(l10n.vibe_import_noEncodingData),
@@ -240,7 +243,10 @@ class VibeImportHandler {
                         Expanded(
                           child: Text(
                             l10n.vibe_import_autoSave,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
                                   color: encodeChecked
                                       ? null
                                       : Theme.of(context)
@@ -257,7 +263,8 @@ class VibeImportHandler {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(context).pop((false, false, false)),
+                  onPressed: () =>
+                      Navigator.of(context).pop((false, false, false)),
                   child: Text(context.l10n.common_cancel),
                 ),
                 ElevatedButton(
@@ -345,21 +352,21 @@ class VibeImportHandler {
           // 添加 30 秒超时保护，防止 API 无限卡住
           final encoding = await notifier
               .encodeVibeWithCache(
-                vibe.rawImageData!,
-                model: model,
-                informationExtracted: vibe.infoExtracted,
-                vibeName: vibe.displayName,
-              )
+            vibe.rawImageData!,
+            model: model,
+            informationExtracted: vibe.infoExtracted,
+            vibeName: vibe.displayName,
+          )
               .timeout(
-                const Duration(seconds: 30),
-                onTimeout: () {
-                  AppLogger.w(
-                    'Vibe encoding timeout: ${vibe.displayName}',
-                    _tag,
-                  );
-                  return null;
-                },
+            const Duration(seconds: 30),
+            onTimeout: () {
+              AppLogger.w(
+                'Vibe encoding timeout: ${vibe.displayName}',
+                _tag,
               );
+              return null;
+            },
+          );
 
           if (encoding != null) {
             encodedVibes.add(
@@ -467,7 +474,8 @@ class VibeImportHandler {
         ref.read(vibeLibraryNotifierProvider.notifier).reload();
       }
     } catch (e, stackTrace) {
-      AppLogger.e('Failed to save encoded vibes to library', e, stackTrace, _tag);
+      AppLogger.e(
+          'Failed to save encoded vibes to library', e, stackTrace, _tag);
       if (context.mounted) {
         AppToast.error(context, context.l10n.vibe_saveToLibrary_saveFailed);
       }
@@ -592,9 +600,11 @@ class VibeImportHandler {
       if (extractedVibes.isNotEmpty) {
         // 设置 bundle 来源
         final vibesWithSource = extractedVibes
-            .map((vibe) => vibe.copyWith(
-                  bundleSource: entry.displayName,
-                ),)
+            .map(
+              (vibe) => vibe.copyWith(
+                bundleSource: entry.displayName,
+              ),
+            )
             .toList();
         notifier.addVibeReferences(vibesWithSource);
 
@@ -624,7 +634,8 @@ class VibeImportHandler {
     // 检查是否有未编码的原始图片
     final unencodedVibes = vibes
         .where(
-          (v) => v.sourceType == VibeSourceType.rawImage && v.vibeEncoding.isEmpty,
+          (v) =>
+              v.sourceType == VibeSourceType.rawImage && v.vibeEncoding.isEmpty,
         )
         .toList();
 
@@ -734,8 +745,7 @@ class VibeImportHandler {
           // 检查是否已存在相同名称的 vibe
           final allEntries = await storageService.getAllEntries();
           final existingEntry = allEntries.firstWhereOrNull((entry) {
-            return entry.name.toLowerCase() ==
-                name.toLowerCase();
+            return entry.name.toLowerCase() == name.toLowerCase();
           });
 
           if (existingEntry != null) {

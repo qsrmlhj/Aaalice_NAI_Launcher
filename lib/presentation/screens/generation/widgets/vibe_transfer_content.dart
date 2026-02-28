@@ -246,7 +246,8 @@ class _VibeTransferContentState extends ConsumerState<VibeTransferContent> {
         HapticFeedback.heavyImpact();
         setState(() => _isDraggingOver = false);
         // 在回调中重新检查限制，使用最新的 vibes 状态
-        final currentVibes = ref.read(generationParamsNotifierProvider).vibeReferencesV4;
+        final currentVibes =
+            ref.read(generationParamsNotifierProvider).vibeReferencesV4;
         if (currentVibes.length >= 16) {
           AppToast.warning(context, context.l10n.vibe_maxReached);
           return;

@@ -581,7 +581,8 @@ class _HistoryPanelState extends ConsumerState<HistoryPanel> {
       image: imageData,
       showMetadataPanel: true,
       callbacks: ImageDetailCallbacks(
-        onSave: (img) => GenerationSaveService.saveImageFromDetail(currentContext, ref, img),
+        onSave: (img) =>
+            GenerationSaveService.saveImageFromDetail(currentContext, ref, img),
       ),
     );
   }
@@ -595,7 +596,8 @@ class _HistoryPanelState extends ConsumerState<HistoryPanel> {
     String prompt = '';
 
     try {
-      final extractedMeta = await ImageMetadataService().getMetadataFromBytes(bytes);
+      final extractedMeta =
+          await ImageMetadataService().getMetadataFromBytes(bytes);
       if (extractedMeta != null && extractedMeta.prompt.isNotEmpty) {
         prompt = extractedMeta.prompt;
       }

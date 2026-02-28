@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/utils/localization_extension.dart';
+import '../../../../core/utils/localization_extension.dart';
 import '../../../providers/layout_state_provider.dart';
 import 'collapsed_panel.dart';
 import 'history_panel.dart';

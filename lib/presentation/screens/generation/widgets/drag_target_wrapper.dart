@@ -113,7 +113,8 @@ class DragTargetWrapper extends ConsumerWidget {
   }
 
   /// 构建空状态 - 双卡片并排布局：从文件添加 + 从库导入
-  Widget _buildEmptyState(BuildContext context, WidgetRef ref, ThemeData theme) {
+  Widget _buildEmptyState(
+      BuildContext context, WidgetRef ref, ThemeData theme) {
     return Row(
       children: [
         // 从文件添加
@@ -142,7 +143,8 @@ class DragTargetWrapper extends ConsumerWidget {
   void _removeVibe(BuildContext context, WidgetRef ref, int index) {
     final notifier = ref.read(generationParamsNotifierProvider.notifier);
     final panelNotifier = ref.read(referencePanelNotifierProvider.notifier);
-    final currentVibes = ref.read(generationParamsNotifierProvider).vibeReferencesV4;
+    final currentVibes =
+        ref.read(generationParamsNotifierProvider).vibeReferencesV4;
 
     // 清理 bundle 来源记录
     if (index < currentVibes.length) {
@@ -167,11 +169,13 @@ class DragTargetWrapper extends ConsumerWidget {
   }
 
   /// 从文件添加 Vibe（供外部调用）
-  static Future<void> addVibeFromFile(BuildContext context, WidgetRef ref) async {
+  static Future<void> addVibeFromFile(
+      BuildContext context, WidgetRef ref) async {
     await _addVibeStatic(context, ref);
   }
 
-  static Future<void> _addVibeStatic(BuildContext context, WidgetRef ref) async {
+  static Future<void> _addVibeStatic(
+      BuildContext context, WidgetRef ref) async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -217,7 +221,8 @@ class DragTargetWrapper extends ConsumerWidget {
                     (bool confirmed, bool encode, bool autoSave)?>(
                   context: context,
                   // ignore: use_build_context_synchronously
-                  builder: (context) => _buildEncodingDialogStatic(context, fileName),
+                  builder: (context) =>
+                      _buildEncodingDialogStatic(context, fileName),
                 );
 
                 if (dialogResult == null || dialogResult.$1 != true) {
@@ -237,7 +242,11 @@ class DragTargetWrapper extends ConsumerWidget {
                     vibes = encodedVibes;
                     if (autoSaveToLibrary && context.mounted) {
                       await _saveEncodedVibesToLibrary(
-                        context, ref, encodedVibes, fileName,);
+                        context,
+                        ref,
+                        encodedVibes,
+                        fileName,
+                      );
                     }
                   } else {
                     final continueAnyway = await showDialog<bool>(
@@ -285,11 +294,14 @@ class DragTargetWrapper extends ConsumerWidget {
     }
   }
 
-  static Widget _buildEncodingDialogStatic(BuildContext context, String fileName) {
-    return _buildEncodingDialogInternal(context, fileName, AppLocalizations.of(context)!, Theme.of(context));
+  static Widget _buildEncodingDialogStatic(
+      BuildContext context, String fileName) {
+    return _buildEncodingDialogInternal(
+        context, fileName, AppLocalizations.of(context)!, Theme.of(context));
   }
 
-  static Widget _buildEncodingDialogInternal(BuildContext context, String fileName, AppLocalizations l10n, ThemeData theme) {
+  static Widget _buildEncodingDialogInternal(BuildContext context,
+      String fileName, AppLocalizations l10n, ThemeData theme) {
     var encodeChecked = true;
     var autoSaveChecked = true;
 
@@ -414,7 +426,8 @@ class DragTargetWrapper extends ConsumerWidget {
     String baseName,
   ) async {
     final panelNotifier = ref.read(referencePanelNotifierProvider.notifier);
-    final result = await panelNotifier.saveEncodedVibesToLibrary(vibes, baseName);
+    final result =
+        await panelNotifier.saveEncodedVibesToLibrary(vibes, baseName);
 
     if (context.mounted) {
       String message;
@@ -444,7 +457,8 @@ class DragTargetWrapper extends ConsumerWidget {
     final result = await showDialog<
         (bool confirmed, double strength, double infoExtracted)?>(
       context: context,
-      builder: (context) => _buildSaveToLibraryDialog(context, nameController, firstVibe),
+      builder: (context) =>
+          _buildSaveToLibraryDialog(context, nameController, firstVibe),
     );
 
     if (result != null && result.$1 && context.mounted) {
@@ -458,7 +472,8 @@ class DragTargetWrapper extends ConsumerWidget {
       if (context.mounted) {
         String message;
         if (saveResult.savedCount > 0 && saveResult.reusedCount > 0) {
-          message = '新增 ${saveResult.savedCount} 个，复用 ${saveResult.reusedCount} 个';
+          message =
+              '新增 ${saveResult.savedCount} 个，复用 ${saveResult.reusedCount} 个';
         } else if (saveResult.savedCount > 0) {
           message = '已保存到 Vibe 库';
         } else {
@@ -510,7 +525,8 @@ class DragTargetWrapper extends ConsumerWidget {
                 _buildDialogSlider(
                   label: 'Information Extracted',
                   value: infoExtractedValue,
-                  onChanged: (value) => setState(() => infoExtractedValue = value),
+                  onChanged: (value) =>
+                      setState(() => infoExtractedValue = value),
                 ),
               ],
             ),
@@ -523,7 +539,8 @@ class DragTargetWrapper extends ConsumerWidget {
             ElevatedButton(
               onPressed: () {
                 if (nameController.text.trim().isNotEmpty) {
-                  Navigator.of(context).pop((true, strengthValue, infoExtractedValue));
+                  Navigator.of(context)
+                      .pop((true, strengthValue, infoExtractedValue));
                 }
               },
               child: Text(context.l10n.common_save),

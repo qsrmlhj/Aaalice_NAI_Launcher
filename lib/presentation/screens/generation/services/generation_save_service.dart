@@ -101,7 +101,8 @@ class GenerationSaveService {
             'Description': existingMetadata.prompt,
             'Software': 'NovelAI',
             'Source': existingMetadata.source ?? 'NovelAI Diffusion',
-            'Comment': jsonEncode(buildCommentJsonFromMetadata(existingMetadata)),
+            'Comment':
+                jsonEncode(buildCommentJsonFromMetadata(existingMetadata)),
           },
         );
       } else {
@@ -123,7 +124,8 @@ class GenerationSaveService {
   }
 
   /// 从元数据构建 Comment JSON
-  static Map<String, dynamic> buildCommentJsonFromMetadata(NaiImageMetadata metadata) {
+  static Map<String, dynamic> buildCommentJsonFromMetadata(
+      NaiImageMetadata metadata) {
     final commentJson = <String, dynamic>{
       'prompt': metadata.prompt,
       'uc': metadata.negativePrompt,
@@ -147,12 +149,10 @@ class GenerationSaveService {
           .where((v) => v.vibeEncoding.isNotEmpty)
           .map((v) => v.vibeEncoding)
           .toList();
-      commentJson['reference_strength_multiple'] = metadata.vibeReferences
-          .map((v) => v.strength)
-          .toList();
-      commentJson['reference_information_extracted_multiple'] = metadata.vibeReferences
-          .map((v) => v.infoExtracted)
-          .toList();
+      commentJson['reference_strength_multiple'] =
+          metadata.vibeReferences.map((v) => v.strength).toList();
+      commentJson['reference_information_extracted_multiple'] =
+          metadata.vibeReferences.map((v) => v.infoExtracted).toList();
     }
 
     return commentJson;

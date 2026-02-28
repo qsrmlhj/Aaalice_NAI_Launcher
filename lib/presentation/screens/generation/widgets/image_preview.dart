@@ -695,7 +695,9 @@ class _ImagePreviewWidgetState extends ConsumerState<ImagePreviewWidget> {
       }).toList();
 
       if (updatedImages.isNotEmpty) {
-        ref.read(imageGenerationNotifierProvider.notifier).updateDisplayImages(updatedImages);
+        ref
+            .read(imageGenerationNotifierProvider.notifier)
+            .updateDisplayImages(updatedImages);
       }
 
       ref.read(localGalleryNotifierProvider.notifier).refresh();
@@ -807,7 +809,9 @@ class _DockedCharacterPanel extends ConsumerWidget {
                       );
                     },
                     onDelete: (id) {
-                      ref.read(characterPromptNotifierProvider.notifier).removeCharacter(id);
+                      ref
+                          .read(characterPromptNotifierProvider.notifier)
+                          .removeCharacter(id);
                     },
                   ),
                 ),
@@ -833,9 +837,11 @@ class _DockedCharacterPanel extends ConsumerWidget {
                   children: [
                     GestureDetector(
                       onTap: () {
-                        ref.read(characterPromptNotifierProvider.notifier).setGlobalAiChoice(
-                          !config.globalAiChoice,
-                        );
+                        ref
+                            .read(characterPromptNotifierProvider.notifier)
+                            .setGlobalAiChoice(
+                              !config.globalAiChoice,
+                            );
                       },
                       child: Text(
                         l10n.characterEditor_globalAiChoice,
@@ -858,12 +864,15 @@ class _DockedCharacterPanel extends ConsumerWidget {
                     Consumer(
                       builder: (context, ref, child) {
                         final globalAiChoice = ref.watch(
-                          characterPromptNotifierProvider.select((c) => c.globalAiChoice),
+                          characterPromptNotifierProvider
+                              .select((c) => c.globalAiChoice),
                         );
                         return ThemedSwitch(
                           value: globalAiChoice,
                           onChanged: (value) {
-                            ref.read(characterPromptNotifierProvider.notifier).setGlobalAiChoice(value);
+                            ref
+                                .read(characterPromptNotifierProvider.notifier)
+                                .setGlobalAiChoice(value);
                           },
                           scale: 0.85,
                         );
@@ -1048,7 +1057,8 @@ class _VerticalGenderButtonState extends State<_VerticalGenderButton> {
               Text(
                 widget.label,
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: _isHovered ? widget.color : colorScheme.onSurfaceVariant,
+                  color:
+                      _isHovered ? widget.color : colorScheme.onSurfaceVariant,
                   fontWeight: _isHovered ? FontWeight.w600 : FontWeight.w500,
                   fontSize: 11,
                 ),
@@ -1108,7 +1118,8 @@ class _VerticalLibraryButtonState extends State<_VerticalLibraryButton> {
               Text(
                 l10n.characterEditor_addFromLibrary,
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: _isHovered ? accentColor : colorScheme.onSurfaceVariant,
+                  color:
+                      _isHovered ? accentColor : colorScheme.onSurfaceVariant,
                   fontWeight: _isHovered ? FontWeight.w600 : FontWeight.w500,
                   fontSize: 11,
                 ),

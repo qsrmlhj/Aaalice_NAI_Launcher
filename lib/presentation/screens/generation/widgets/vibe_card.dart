@@ -26,13 +26,15 @@ class VibeCard extends ConsumerStatefulWidget {
   final ValueChanged<double> onInfoExtractedChanged;
 
   /// 编码 Vibe 的回调，返回编码后的字符串或 null
-  final Future<String?> Function(Uint8List imageData, {
+  final Future<String?> Function(
+    Uint8List imageData, {
     required double informationExtracted,
     required String vibeName,
   })? onEncode;
 
   /// 更新 Vibe 编码的回调
-  final void Function(int index, {required String vibeEncoding})? onUpdateEncoding;
+  final void Function(int index, {required String vibeEncoding})?
+      onUpdateEncoding;
 
   const VibeCard({
     super.key,
