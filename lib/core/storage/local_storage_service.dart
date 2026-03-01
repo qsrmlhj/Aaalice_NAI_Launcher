@@ -65,6 +65,21 @@ class LocalStorageService {
     await setSetting(StorageKeys.fontFamily, fontFamily);
   }
 
+  /// 获取字体缩放比例 (默认 1.0)
+  double getFontScale() {
+    final value = getSetting(StorageKeys.fontScale);
+    if (value == null) return 1.0;
+    // 处理可能存储为 int 的情况
+    if (value is int) return value.toDouble();
+    if (value is double) return value;
+    return 1.0;
+  }
+
+  /// 保存字体缩放比例
+  Future<void> setFontScale(double scale) async {
+    await setSetting(StorageKeys.fontScale, scale);
+  }
+
   // ==================== Locale ====================
 
   /// 获取语言代码
