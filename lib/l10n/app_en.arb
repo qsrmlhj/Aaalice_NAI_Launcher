@@ -3753,6 +3753,14 @@
   "settings_hivePathSaved": "Data storage path saved, effective after restart",
   "settings_restartRequiredTitle": "Restart Required",
   "settings_changePathConfirm": "After changing the data storage path, the app needs to restart to take effect.\\n\\nThe new path will take effect on the next startup. Continue?",
-  "settings_resetPathConfirm": "After resetting the data storage path, the app needs to restart to take effect.\\n\\nThe default path will take effect on the next startup. Continue?"
+  "settings_resetPathConfirm": "After resetting the data storage path, the app needs to restart to take effect.\\n\\nThe default path will take effect on the next startup. Continue?",
+
+  "settings_fontScale": "Font Size",
+  "settings_fontScale_description": "Adjust global font scale",
+  "settings_fontScale_previewSmall": "The setting sun and lone duck fly together",
+  "settings_fontScale_previewMedium": "Autumn water merges with the endless sky",
+  "settings_fontScale_previewLarge": "Font Size Preview",
+  "settings_fontScale_reset": "Reset",
+  "settings_fontScale_done": "Done"
 
 }
