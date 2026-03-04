@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../../data/models/gallery/local_image_record.dart';
+import 'draggable_image_card.dart';
 import 'local_image_card_3d.dart';
 
 class ResponsiveLayout {
@@ -45,6 +46,7 @@ class GalleryGrid extends StatefulWidget {
   final void Function(LocalImageRecord record, int index)? onSendToHome;
   final Set<int>? selectedIndices;
   final double preloadScreens;
+  final bool enableDrag;
 
   const GalleryGrid({
     super.key,
@@ -60,6 +62,7 @@ class GalleryGrid extends StatefulWidget {
     this.onSendToHome,
     this.selectedIndices,
     this.preloadScreens = 2.0,
+    this.enableDrag = true,
   });
 
   @override
@@ -151,7 +154,8 @@ class _GalleryGridState extends State<GalleryGrid> {
           controller: _scrollController,
           primary: false,
           padding: EdgeInsets.symmetric(
-            horizontal: horizontalPadding.clamp(widget.padding.left, double.infinity),
+            horizontal:
+                horizontalPadding.clamp(widget.padding.left, double.infinity),
             vertical: widget.padding.top,
           ),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -174,7 +178,7 @@ class _GalleryGridState extends State<GalleryGrid> {
               onVisibilityChanged: (info) {
                 // 检查 mounted 避免 dispose 后调用 setState
                 if (!mounted) return;
-                
+
                 final isNowVisible = info.visibleFraction > 0.05;
                 final wasVisible = _visibleIndices.contains(index);
 
@@ -191,20 +195,23 @@ class _GalleryGridState extends State<GalleryGrid> {
               },
               child: RepaintBoundary(
                 child: _GalleryImageCard(
-                key: ValueKey(record.path),
-                record: record,
-                width: itemWidth,
-                height: itemHeight,
-                isSelected: isSelected,
-                isVisible: isVisible,
-                priority: priority,
-                onTap: () => widget.onTap?.call(record, index),
-                onDoubleTap: () => widget.onDoubleTap?.call(record, index),
-                onLongPress: () => widget.onLongPress?.call(record, index),
-                onSecondaryTapDown: (details) => widget.onSecondaryTapDown?.call(record, index, details),
-                onFavoriteToggle: () => widget.onFavoriteToggle?.call(record, index),
-                onSendToHome: () => widget.onSendToHome?.call(record, index),
-              ),
+                  key: ValueKey(record.path),
+                  record: record,
+                  width: itemWidth,
+                  height: itemHeight,
+                  isSelected: isSelected,
+                  isVisible: isVisible,
+                  priority: priority,
+                  enableDrag: widget.enableDrag,
+                  onTap: () => widget.onTap?.call(record, index),
+                  onDoubleTap: () => widget.onDoubleTap?.call(record, index),
+                  onLongPress: () => widget.onLongPress?.call(record, index),
+                  onSecondaryTapDown: (details) =>
+                      widget.onSecondaryTapDown?.call(record, index, details),
+                  onFavoriteToggle: () =>
+                      widget.onFavoriteToggle?.call(record, index),
+                  onSendToHome: () => widget.onSendToHome?.call(record, index),
+                ),
               ),
             );
           },
@@ -215,12 +222,14 @@ class _GalleryGridState extends State<GalleryGrid> {
 
   void _updatePreloadRange(int visibleIndex) {
     final itemsPerRow = widget.columns;
-    final rowsPerScreen =
-        (_viewportHeight / ResponsiveLayout.fixedCardHeight).ceil().clamp(2, 10);
+    final rowsPerScreen = (_viewportHeight / ResponsiveLayout.fixedCardHeight)
+        .ceil()
+        .clamp(2, 10);
     final itemsPerScreen = itemsPerRow * rowsPerScreen;
     final preloadCount = (itemsPerScreen * widget.preloadScreens).round();
 
-    final (int forwardPreload, int backwardPreload) = switch (_scrollDirection) {
+    final (int forwardPreload, int backwardPreload) =
+        switch (_scrollDirection) {
       _ScrollDirection.down => (preloadCount, preloadCount ~/ 3),
       _ScrollDirection.up => (preloadCount ~/ 3, preloadCount),
       _ScrollDirection.idle => (preloadCount, preloadCount ~/ 2),
@@ -237,7 +246,7 @@ class _GalleryGridState extends State<GalleryGrid> {
     }
 
     if ((_preloadIndices.difference(newPreloadIndices).isNotEmpty ||
-        newPreloadIndices.difference(_preloadIndices).isNotEmpty) &&
+            newPreloadIndices.difference(_preloadIndices).isNotEmpty) &&
         mounted) {
       setState(() {
         _preloadIndices
@@ -255,6 +264,7 @@ class _GalleryImageCard extends StatefulWidget {
   final bool isSelected;
   final bool isVisible;
   final int priority;
+  final bool enableDrag;
   final VoidCallback? onTap;
   final VoidCallback? onDoubleTap;
   final VoidCallback? onLongPress;
@@ -270,6 +280,7 @@ class _GalleryImageCard extends StatefulWidget {
     this.isSelected = false,
     this.isVisible = false,
     this.priority = 5,
+    this.enableDrag = true,
     this.onTap,
     this.onDoubleTap,
     this.onLongPress,
@@ -285,19 +296,23 @@ class _GalleryImageCard extends StatefulWidget {
 class _GalleryImageCardState extends State<_GalleryImageCard> {
   @override
   Widget build(BuildContext context) {
-    return LocalImageCard3D(
+    return DraggableImageCard(
       record: widget.record,
-      width: widget.width,
-      height: widget.height,
-      isSelected: widget.isSelected,
-      isVisible: widget.isVisible,
-      priority: widget.priority,
-      onTap: widget.onTap,
-      onDoubleTap: widget.onDoubleTap,
-      onLongPress: widget.onLongPress,
-      onSecondaryTapDown: widget.onSecondaryTapDown,
-      onFavoriteToggle: widget.onFavoriteToggle,
-      onSendToHome: widget.onSendToHome,
+      enabled: widget.enableDrag,
+      child: LocalImageCard3D(
+        record: widget.record,
+        width: widget.width,
+        height: widget.height,
+        isSelected: widget.isSelected,
+        isVisible: widget.isVisible,
+        priority: widget.priority,
+        onTap: widget.onTap,
+        onDoubleTap: widget.onDoubleTap,
+        onLongPress: widget.onLongPress,
+        onSecondaryTapDown: widget.onSecondaryTapDown,
+        onFavoriteToggle: widget.onFavoriteToggle,
+        onSendToHome: widget.onSendToHome,
+      ),
     );
   }
 }

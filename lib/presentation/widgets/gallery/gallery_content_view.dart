@@ -384,6 +384,7 @@ class _GenericGalleryContentViewState<T>
       spacing: 12,
       padding: const EdgeInsets.all(16),
       selectedIndices: selectionState.isActive ? selectedIndices : null,
+      enableDrag: !selectionState.isActive,
       onTap: (record, index) {
         if (selectionState.isActive) {
           widget.onSelectionToggle?.call(state.currentImages[index]);
@@ -515,7 +516,8 @@ class LocalGalleryContentView extends ConsumerWidget {
     final state = ref.watch(localGalleryNotifierProvider);
     final selectionState = ref.watch(localGallerySelectionNotifierProvider);
 
-    void showImageDetailViewer(List<LocalImageRecord> images, int initialIndex) {
+    void showImageDetailViewer(
+        List<LocalImageRecord> images, int initialIndex) {
       bool getFavoriteStatus(String path) {
         final providerState = ref.read(localGalleryNotifierProvider);
         final image = providerState.currentImages
@@ -526,13 +528,17 @@ class LocalGalleryContentView extends ConsumerWidget {
 
       ImageDetailOpener.showMultipleImmediate(
         context,
-        images: images.map((r) => LocalImageDetailData(r, getFavoriteStatus: getFavoriteStatus)).toList(),
+        images: images
+            .map((r) =>
+                LocalImageDetailData(r, getFavoriteStatus: getFavoriteStatus))
+            .toList(),
         initialIndex: initialIndex,
         showMetadataPanel: true,
         showThumbnails: images.length > 1,
         callbacks: ImageDetailCallbacks(
           onReuseMetadata: onReuseMetadata != null
-              ? (data, _) => onReuseMetadata?.call((data as LocalImageDetailData).record)
+              ? (data, _) =>
+                  onReuseMetadata?.call((data as LocalImageDetailData).record)
               : null,
           onFavoriteToggle: (data) => ref
               .read(localGalleryNotifierProvider.notifier)
@@ -560,7 +566,8 @@ class LocalGalleryContentView extends ConsumerWidget {
         onFavoriteToggle: () => ref
             .read(localGalleryNotifierProvider.notifier)
             .toggleFavorite(record.path),
-        onSendToHome: onReuseMetadata != null ? () => onReuseMetadata!(record) : null,
+        onSendToHome:
+            onReuseMetadata != null ? () => onReuseMetadata!(record) : null,
       ),
       onSelectionToggle: (record) => ref
           .read(localGallerySelectionNotifierProvider.notifier)
@@ -573,9 +580,12 @@ class LocalGalleryContentView extends ConsumerWidget {
           .toggleFavorite(record.path),
       onContextMenu: onContextMenu,
       onDeleted: onDeleted,
-      onClearFilters: () => ref.read(localGalleryNotifierProvider.notifier).clearAllFilters(),
-      onRefresh: () => ref.read(localGalleryNotifierProvider.notifier).refresh(),
-      onLoadPage: (page) => ref.read(localGalleryNotifierProvider.notifier).loadPage(page),
+      onClearFilters: () =>
+          ref.read(localGalleryNotifierProvider.notifier).clearAllFilters(),
+      onRefresh: () =>
+          ref.read(localGalleryNotifierProvider.notifier).refresh(),
+      onLoadPage: (page) =>
+          ref.read(localGalleryNotifierProvider.notifier).loadPage(page),
       groupedGridViewKey: groupedGridViewKey,
       view3DConfig: Gallery3DViewConfig<LocalImageRecord>(
         images: state.currentImages,

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:super_clipboard/super_clipboard.dart';
+import 'package:super_drag_and_drop/super_drag_and_drop.dart';
 
 import '../../../data/models/gallery/gallery_category.dart';
 import '../../../data/models/gallery/local_image_record.dart';
@@ -20,7 +22,8 @@ class GalleryCategoryTreeView extends StatefulWidget {
   final ValueChanged<String>? onCategoryDelete;
   final ValueChanged<String?>? onAddSubCategory;
   final void Function(String categoryId, String? newParentId)? onCategoryMove;
-  final void Function(String? parentId, int oldIndex, int newIndex)? onCategoryReorder;
+  final void Function(String? parentId, int oldIndex, int newIndex)?
+      onCategoryReorder;
   final void Function(String imagePath, String? categoryId)? onImageDrop;
   final VoidCallback? onSyncWithFileSystem;
 
@@ -49,6 +52,7 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
   final Set<String> _expandedIds = {};
   String? _hoveredCategoryId;
   Timer? _autoExpandTimer;
+  final Set<String> _superDraggingCategoryIds = {};
 
   @override
   void dispose() {
@@ -71,7 +75,8 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
 
     return GestureDetector(
       onSecondaryTapUp: widget.onAddSubCategory != null
-          ? (details) => _showEmptyAreaContextMenu(context, details.globalPosition)
+          ? (details) =>
+              _showEmptyAreaContextMenu(context, details.globalPosition)
           : null,
       behavior: HitTestBehavior.translucent,
       child: Column(
@@ -119,7 +124,8 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
   void _showEmptyAreaContextMenu(BuildContext context, Offset position) {
     showMenu(
       context: context,
-      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx + 1, position.dy + 1),
+      position: RelativeRect.fromLTRB(
+          position.dx, position.dy, position.dx + 1, position.dy + 1),
       items: [
         PopupMenuItem(
           onTap: () => widget.onAddSubCategory?.call(null),
@@ -135,7 +141,8 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
     );
   }
 
-  Widget _buildCategoryNode(ThemeData theme, GalleryCategory category, int depth) {
+  Widget _buildCategoryNode(
+      ThemeData theme, GalleryCategory category, int depth) {
     final children = widget.categories.getChildren(category.id).sortedByOrder();
     final hasChildren = children.isNotEmpty;
     final isExpanded = _expandedIds.contains(category.id);
@@ -182,14 +189,16 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
       categoryItem = _buildCategoryDragTarget(theme, category, categoryItem);
     }
 
-    categoryItem = _buildImageDropTarget(categoryId: category.id, child: categoryItem);
+    categoryItem =
+        _buildImageDropTarget(categoryId: category.id, child: categoryItem);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         categoryItem,
         if (hasChildren && isExpanded)
-          ...children.map((child) => _buildCategoryNode(theme, child, depth + 1)),
+          ...children
+              .map((child) => _buildCategoryNode(theme, child, depth + 1)),
       ],
     );
   }
@@ -251,7 +260,8 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
       onWillAcceptWithDetails: (details) {
         final draggedCategory = details.data;
         if (draggedCategory.id == targetCategory.id) return false;
-        if (widget.categories.wouldCreateCycle(draggedCategory.id, targetCategory.id)) {
+        if (widget.categories
+            .wouldCreateCycle(draggedCategory.id, targetCategory.id)) {
           return false;
         }
         if (draggedCategory.parentId == targetCategory.id) return false;
@@ -269,7 +279,8 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
       onMove: (details) {
         if (_hoveredCategoryId != targetCategory.id) {
           setState(() => _hoveredCategoryId = targetCategory.id);
-          final hasChildren = widget.categories.getChildren(targetCategory.id).isNotEmpty;
+          final hasChildren =
+              widget.categories.getChildren(targetCategory.id).isNotEmpty;
           if (hasChildren && !_expandedIds.contains(targetCategory.id)) {
             _startAutoExpandTimer(targetCategory.id);
           }
@@ -313,7 +324,8 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
   }) {
     if (widget.onImageDrop == null) return child;
 
-    return DragTarget<LocalImageRecord>(
+    // 构建 DragTarget 用于 Flutter 原生拖拽
+    final dragTarget = DragTarget<LocalImageRecord>(
       onWillAcceptWithDetails: (_) => true,
       onAcceptWithDetails: (details) {
         HapticFeedback.heavyImpact();
@@ -321,11 +333,15 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
       },
       builder: (context, candidateData, rejectedData) {
         final isAccepting = candidateData.isNotEmpty;
+        final isSuperDragging = _superDraggingCategoryIds.contains(
+          categoryId ?? '__root__',
+        );
+        final showDropEffect = isAccepting || isSuperDragging;
 
         return AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           decoration: BoxDecoration(
-            gradient: isAccepting
+            gradient: showDropEffect
                 ? LinearGradient(
                     colors: [
                       Colors.green.withOpacity(0.15),
@@ -335,15 +351,100 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
                     end: Alignment.centerRight,
                   )
                 : null,
-            border: isAccepting
+            border: showDropEffect
                 ? const Border(left: BorderSide(color: Colors.green, width: 4))
                 : null,
-            borderRadius: isAccepting ? BorderRadius.circular(8) : null,
+            borderRadius: showDropEffect ? BorderRadius.circular(8) : null,
           ),
           child: child,
         );
       },
     );
+
+    // 使用 DropRegion 包裹 DragTarget，支持 super_drag_and_drop 跨应用拖拽
+    return DropRegion(
+      formats: const [Formats.fileUri],
+      onDropOver: (event) {
+        if (event.session.allowedOperations.contains(DropOperation.copy)) {
+          final key = categoryId ?? '__root__';
+          if (!_superDraggingCategoryIds.contains(key)) {
+            setState(() => _superDraggingCategoryIds.add(key));
+          }
+          return DropOperation.copy;
+        }
+        return DropOperation.none;
+      },
+      onDropLeave: (event) {
+        final key = categoryId ?? '__root__';
+        if (_superDraggingCategoryIds.contains(key)) {
+          setState(() => _superDraggingCategoryIds.remove(key));
+        }
+      },
+      onPerformDrop: (event) async {
+        final key = categoryId ?? '__root__';
+        if (_superDraggingCategoryIds.contains(key)) {
+          setState(() => _superDraggingCategoryIds.remove(key));
+        }
+
+        // 处理拖拽的文件
+        for (final item in event.session.items) {
+          final reader = item.dataReader;
+          if (reader == null) continue;
+
+          // 读取文件 URI
+          if (reader.canProvide(Formats.fileUri)) {
+            final filePath = await _getFilePathFromUri(reader);
+            if (filePath != null) {
+              HapticFeedback.heavyImpact();
+              widget.onImageDrop?.call(filePath, categoryId);
+            }
+          }
+        }
+      },
+      child: dragTarget,
+    );
+  }
+
+  /// 从 DataReader 中提取文件路径
+  Future<String?> _getFilePathFromUri(DataReader reader) async {
+    final completer = Completer<String?>();
+
+    final progress = reader.getValue(
+      Formats.fileUri,
+      (uri) {
+        if (!completer.isCompleted) {
+          if (uri == null) {
+            completer.complete(null);
+            return;
+          }
+          try {
+            final filePath = uri.toFilePath();
+            completer.complete(filePath);
+          } catch (e) {
+            completer.complete(null);
+          }
+        }
+      },
+      onError: (e) {
+        if (!completer.isCompleted) {
+          completer.complete(null);
+        }
+      },
+    );
+
+    if (progress == null) {
+      return null;
+    }
+
+    // 添加超时保护
+    try {
+      return await completer.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => null,
+      );
+    } catch (e) {
+      return null;
+    }
   }
 }
 
@@ -450,7 +551,9 @@ class _CategoryItemState extends State<_CategoryItem> {
                       child: Padding(
                         padding: const EdgeInsets.only(right: 4),
                         child: Icon(
-                          widget.isExpanded ? Icons.expand_more : Icons.chevron_right,
+                          widget.isExpanded
+                              ? Icons.expand_more
+                              : Icons.chevron_right,
                           size: 16,
                           color: theme.colorScheme.outline,
                         ),
@@ -484,13 +587,16 @@ class _CategoryItemState extends State<_CategoryItem> {
                               }
                               setState(() => _isEditing = false);
                             },
-                            onTapOutside: (_) => setState(() => _isEditing = false),
+                            onTapOutside: (_) =>
+                                setState(() => _isEditing = false),
                           )
                         : Text(
                             widget.label,
                             style: TextStyle(
                               fontSize: 13,
-                              fontWeight: widget.isSelected ? FontWeight.w600 : FontWeight.w500,
+                              fontWeight: widget.isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
                               color: widget.isSelected
                                   ? theme.colorScheme.primary
                                   : theme.colorScheme.onSurface,
@@ -526,7 +632,8 @@ class _CategoryItemState extends State<_CategoryItem> {
   void _showContextMenu(BuildContext context, Offset position) {
     showMenu(
       context: context,
-      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx + 1, position.dy + 1),
+      position: RelativeRect.fromLTRB(
+          position.dx, position.dy, position.dx + 1, position.dy + 1),
       items: [
         if (widget.onRename != null)
           PopupMenuItem(
