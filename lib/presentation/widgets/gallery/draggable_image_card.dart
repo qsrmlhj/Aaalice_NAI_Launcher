@@ -70,8 +70,88 @@ class DraggableImageCard extends StatelessWidget {
       dragItemProvider: (request) => _createDragItem(dragData),
       liftBuilder: enableFeedback ? (context, child) => feedbackWidget : null,
       dragBuilder: enableFeedback ? (context, child) => feedbackWidget : null,
-      child: child,
+      child: DraggableWidget(
+        child: child,
+      ),
     );
+  }
+
+  /// 创建拖拽包装器函数
+  ///
+  /// 用于配合 [LocalImageCard3D.dragWrapper] 使用，将拖拽功能注入到卡片内部
+  /// 解决 GestureDetector 与 DragItemWidget 的手势冲突问题
+  ///
+  /// 使用示例：
+  /// ```dart
+  /// LocalImageCard3D(
+  ///   dragWrapper: DraggableImageCard.createDragWrapper(
+  ///     context: context,
+  ///     record: record,
+  ///   ),
+  /// )
+  /// ```
+  static Widget Function(Widget child) createDragWrapper({
+    required BuildContext context,
+    required LocalImageRecord record,
+    Uint8List? previewBytes,
+    bool enableFeedback = true,
+    double feedbackWidth = 280,
+    String? feedbackHint,
+  }) {
+    final theme = Theme.of(context);
+    final dragData = ImageDragData.fromRecord(
+      record,
+      previewBytes: previewBytes,
+    );
+
+    // 构建拖拽反馈 Widget
+    final feedbackWidget = buildImageDragFeedback(
+      theme,
+      dragData,
+      width: feedbackWidth,
+      hintText: feedbackHint ?? '拖拽以分享',
+    );
+
+    return (Widget child) {
+      return DragItemWidget(
+        allowedOperations: () => [DropOperation.copy],
+        dragItemProvider: (request) async {
+          final fileName = dragData.fileName;
+          final filePath = dragData.path;
+
+          // 创建拖拽项，建议文件名
+          final item = DragItem(suggestedName: fileName);
+
+          // 添加 PNG 格式数据（如果文件是 PNG）
+          if (dragData.isPng) {
+            try {
+              final file = File(filePath);
+              if (await file.exists()) {
+                final bytes = await file.readAsBytes();
+                item.add(Formats.png(bytes));
+              }
+            } catch (e) {
+              debugPrint('Failed to read PNG file for drag: $e');
+            }
+          }
+
+          // 添加文件 URI 格式（所有文件类型都支持）
+          try {
+            final uri = Uri.file(filePath);
+            item.add(Formats.fileUri(uri));
+          } catch (e) {
+            debugPrint('Failed to create file URI for drag: $e');
+          }
+
+          return item;
+        },
+        liftBuilder: enableFeedback ? (context, child) => feedbackWidget : null,
+        dragBuilder: enableFeedback ? (context, child) => feedbackWidget : null,
+        child: DraggableWidget(
+          child: child,
+        ),
+      );
+    };
   }
 
   /// 创建拖拽项

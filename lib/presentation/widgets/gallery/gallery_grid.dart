@@ -296,23 +296,27 @@ class _GalleryImageCard extends StatefulWidget {
 class _GalleryImageCardState extends State<_GalleryImageCard> {
   @override
   Widget build(BuildContext context) {
-    return DraggableImageCard(
+    return LocalImageCard3D(
       record: widget.record,
-      enabled: widget.enableDrag,
-      child: LocalImageCard3D(
-        record: widget.record,
-        width: widget.width,
-        height: widget.height,
-        isSelected: widget.isSelected,
-        isVisible: widget.isVisible,
-        priority: widget.priority,
-        onTap: widget.onTap,
-        onDoubleTap: widget.onDoubleTap,
-        onLongPress: widget.onLongPress,
-        onSecondaryTapDown: widget.onSecondaryTapDown,
-        onFavoriteToggle: widget.onFavoriteToggle,
-        onSendToHome: widget.onSendToHome,
-      ),
+      width: widget.width,
+      height: widget.height,
+      isSelected: widget.isSelected,
+      isVisible: widget.isVisible,
+      priority: widget.priority,
+      onTap: widget.onTap,
+      onDoubleTap: widget.onDoubleTap,
+      onLongPress: widget.onLongPress,
+      onSecondaryTapDown: widget.onSecondaryTapDown,
+      onFavoriteToggle: widget.onFavoriteToggle,
+      onSendToHome: widget.onSendToHome,
+      // 使用 dragWrapper 将拖拽功能注入到卡片内部
+      // 解决 GestureDetector 与拖拽手势的冲突问题
+      dragWrapper: widget.enableDrag
+          ? DraggableImageCard.createDragWrapper(
+              context: context,
+              record: widget.record,
+            )
+          : null,
     );
   }
 }
