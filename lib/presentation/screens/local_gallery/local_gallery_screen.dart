@@ -592,11 +592,12 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
 
   Future<void> _deleteSelectedImages() async {
     final selectionState = ref.read(localGallerySelectionNotifierProvider);
-    final galleryState = ref.read(localGalleryNotifierProvider);
 
-    final selectedImages = galleryState.currentImages
-        .where((img) => selectionState.selectedIds.contains(img.path))
-        .toList();
+    // 从数据库获取所有选中项的完整记录（支持跨页）
+    final service = await ref.read(localGalleryNotifierProvider.notifier).getService();
+    final selectedImages = await service.getRecordsByPaths(
+      selectionState.selectedIds.toList(),
+    );
 
     if (selectedImages.isEmpty) return;
 
@@ -639,11 +640,12 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
 
   Future<void> _packSelectedImages() async {
     final selectionState = ref.read(localGallerySelectionNotifierProvider);
-    final galleryState = ref.read(localGalleryNotifierProvider);
 
-    final selectedImages = galleryState.currentImages
-        .where((img) => selectionState.selectedIds.contains(img.path))
-        .toList();
+    // 从数据库获取所有选中项的完整记录（支持跨页）
+    final service = await ref.read(localGalleryNotifierProvider.notifier).getService();
+    final selectedImages = await service.getRecordsByPaths(
+      selectionState.selectedIds.toList(),
+    );
 
     if (selectedImages.isEmpty || !mounted) return;
 
@@ -683,12 +685,13 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
 
   Future<void> _moveSelectedToFolder() async {
     final selectionState = ref.read(localGallerySelectionNotifierProvider);
-    final galleryState = ref.read(localGalleryNotifierProvider);
     final folderState = ref.read(galleryFolderNotifierProvider);
 
-    final selectedImages = galleryState.currentImages
-        .where((img) => selectionState.selectedIds.contains(img.path))
-        .toList();
+    // 从数据库获取所有选中项的完整记录（支持跨页）
+    final service = await ref.read(localGalleryNotifierProvider.notifier).getService();
+    final selectedImages = await service.getRecordsByPaths(
+      selectionState.selectedIds.toList(),
+    );
 
     if (selectedImages.isEmpty) return;
 
@@ -751,11 +754,12 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
 
   Future<void> _addSelectedToCollection() async {
     final selectionState = ref.read(localGallerySelectionNotifierProvider);
-    final galleryState = ref.read(localGalleryNotifierProvider);
 
-    final selectedImages = galleryState.currentImages
-        .where((img) => selectionState.selectedIds.contains(img.path))
-        .toList();
+    // 从数据库获取所有选中项的完整记录（支持跨页）
+    final service = await ref.read(localGalleryNotifierProvider.notifier).getService();
+    final selectedImages = await service.getRecordsByPaths(
+      selectionState.selectedIds.toList(),
+    );
 
     if (selectedImages.isEmpty || !mounted) return;
 

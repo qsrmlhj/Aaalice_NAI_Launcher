@@ -136,6 +136,13 @@ abstract class LocalGalleryService {
 
   /// 关闭服务并释放资源
   Future<void> dispose();
+
+  /// 根据路径列表获取图片记录
+  ///
+  /// [paths] 图片文件路径列表
+  ///
+  /// 返回对应的图片记录列表，如果某些路径不存在则跳过
+  Future<List<LocalImageRecord>> getRecordsByPaths(List<String> paths);
 }
 
 /// 画廊服务实现
@@ -594,6 +601,107 @@ class LocalGalleryServiceImpl implements LocalGalleryService {
     );
   }
 
+  @override
+  Future<List<LocalImageRecord>> getRecordsByPaths(List<String> paths) async {
+    _ensureInitialized();
+
+    if (paths.isEmpty) return [];
+
+    // 过滤出存在的文件
+    final existingFiles = <File>[];
+    for (final path in paths) {
+      final file = File(path);
+      if (await file.exists()) {
+        existingFiles.add(file);
+      }
+    }
+
+    if (existingFiles.isEmpty) return [];
+
+    // 获取文件状态信息
+    final fileStats = <File, FileStat>{};
+    for (final file in existingFiles) {
+      try {
+        fileStats[file] = await file.stat();
+      } catch (e) {
+        AppLogger.w('Failed to stat file: ${file.path}', 'LocalGalleryService');
+      }
+    }
+
+    // 批量获取数据库信息
+    final filePaths = existingFiles.map((f) => f.path).toList();
+    final pathToIdMap = await _dataSource.getImageIdsByPaths(filePaths);
+
+    // 收集有效的图片ID
+    final imageIds = pathToIdMap.values.whereType<int>().toList();
+
+    // 并行获取收藏、标签、元数据
+    final results = await Future.wait([
+      if (imageIds.isNotEmpty)
+        _dataSource.getFavoritesByImageIds(imageIds)
+      else
+        Future.value(<int, bool>{}),
+      if (imageIds.isNotEmpty)
+        _dataSource.getTagsByImageIds(imageIds)
+      else
+        Future.value(<int, List<String>>{}),
+      if (imageIds.isNotEmpty)
+        _dataSource.getMetadataByImageIds(imageIds)
+      else
+        Future.value(<int, GalleryMetadataRecord?>{}),
+    ]);
+
+    final favoritesMap = results[0] as Map<int, bool>;
+    final tagsMap = results[1] as Map<int, List<String>>;
+    final metadataMap = results[2] as Map<int, GalleryMetadataRecord?>;
+
+    // 构建记录列表
+    final records = <LocalImageRecord>[];
+
+    for (final file in existingFiles) {
+      try {
+        final stat = fileStats[file];
+        if (stat == null) continue;
+
+        final imageId = pathToIdMap[file.path];
+        bool isFavorite = false;
+        List<String> tags = [];
+        NaiImageMetadata? metadata;
+        MetadataStatus metadataStatus = MetadataStatus.none;
+
+        if (imageId != null) {
+          isFavorite = favoritesMap[imageId] ?? false;
+          tags = tagsMap[imageId] ?? [];
+
+          final metadataRecord = metadataMap[imageId];
+          if (metadataRecord != null) {
+            metadata = _buildMetadataFromRecord(metadataRecord);
+            metadataStatus =
+                metadata.hasData ? MetadataStatus.success : MetadataStatus.none;
+          }
+        }
+
+        records.add(
+          LocalImageRecord(
+            path: file.path,
+            size: stat.size,
+            modifiedAt: stat.modified,
+            isFavorite: isFavorite,
+            tags: tags,
+            metadata: metadata,
+            metadataStatus: metadataStatus,
+          ),
+        );
+      } catch (e) {
+        AppLogger.w(
+            'Failed to load record for ${file.path}', 'LocalGalleryService',);
+        // 跳过加载失败的记录
+      }
+    }
+
+    return records;
+  }
+
   // ============================================================
   // 过滤
   // ============================================================
@@ -1025,6 +1133,10 @@ class ErrorGalleryService implements LocalGalleryService {
 
   @override
   Future<void> dispose() async {}
+
+  @override
+  Future<List<LocalImageRecord>> getRecordsByPaths(List<String> paths) =>
+      _throwError();
 }
 
 /// 占位服务实现
@@ -1093,4 +1205,8 @@ class _PlaceholderGalleryService implements LocalGalleryService {
 
   @override
   Future<void> dispose() async {}
+
+  @override
+  Future<List<LocalImageRecord>> getRecordsByPaths(List<String> paths) =>
+      _throwNotInitialized();
 }

@@ -135,7 +135,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
   /// 获取服务实例
   ///
   /// 延迟初始化，确保在调用时才获取
-  Future<LocalGalleryService> _getService() async {
+  Future<LocalGalleryService> getService() async {
     if (_service == null) {
       // 等待服务初始化完成（最多10秒）
       var attempts = 0;
@@ -202,7 +202,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
     ),);
 
     try {
-      final service = await _getService();
+      final service = await getService();
 
       // 检测是否为首次大量索引
       final totalCount = service.totalCount;
@@ -283,7 +283,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
     }
 
     try {
-      final service = await _getService();
+      final service = await getService();
       final records = await service.getPage(page, pageSize: state.pageSize);
 
       // 计算总页数
@@ -347,7 +347,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
     _setState(state.copyWith(isLoading: true));
 
     try {
-      final service = await _getService();
+      final service = await getService();
       await service.refresh();
 
       // 重新应用当前过滤
@@ -389,7 +389,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
     var addedCount = 0;
     
     try {
-      final service = await _getService();
+      final service = await getService();
       
       for (final filePath in filePaths) {
         // 尝试即时添加新图像（不等待扫描）
@@ -473,7 +473,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
     // 更新服务层的分页大小
     try {
-      final service = await _getService();
+      final service = await getService();
       await service.setPageSize(size);
     } catch (_) {}
 
@@ -553,7 +553,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
     _setState(state.copyWith(isGroupedLoading: true));
     try {
       // 加载所有过滤后的图片用于分组
-      final service = await _getService();
+      final service = await getService();
       final allRecords = <LocalImageRecord>[];
 
       // 分批加载所有图片
@@ -588,7 +588,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
   /// 应用过滤条件
   Future<void> _applyFilters() async {
     try {
-      final service = await _getService();
+      final service = await getService();
       final criteria = state.filterCriteria;
 
       // 【调试】记录过滤条件详情
@@ -638,7 +638,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
   Future<void> toggleFavorite(String filePath) async {
     try {
-      final service = await _getService();
+      final service = await getService();
       final isFav = await service.toggleFavorite(filePath);
 
       // 更新当前页显示
@@ -667,7 +667,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
   Future<bool> isFavorite(String filePath) async {
     try {
-      final service = await _getService();
+      final service = await getService();
       return await service.isFavorite(filePath);
     } catch (e) {
       AppLogger.e('Check favorite failed', e, null, 'LocalGalleryNotifier');
@@ -677,7 +677,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
   Future<int> getTotalFavoriteCount() async {
     try {
-      final service = await _getService();
+      final service = await getService();
       // 通过过滤收藏项统计
       const favCriteria = FilterCriteria(showFavoritesOnly: true);
       await service.applyFilter(favCriteria);
@@ -698,7 +698,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
   Future<NaiImageMetadata?> getMetadata(String filePath) async {
     try {
-      final service = await _getService();
+      final service = await getService();
       return await service.getMetadata(filePath);
     } on GalleryMetadataException catch (e) {
       AppLogger.w('Get metadata failed: ${e.message}', 'LocalGalleryNotifier');
@@ -775,7 +775,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       }
 
       // 刷新服务状态
-      final service = await _getService();
+      final service = await getService();
 
       // 刷新状态
       _setState(state.copyWith(
