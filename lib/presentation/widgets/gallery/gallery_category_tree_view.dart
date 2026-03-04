@@ -125,7 +125,11 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
     showMenu(
       context: context,
       position: RelativeRect.fromLTRB(
-          position.dx, position.dy, position.dx + 1, position.dy + 1),
+        position.dx,
+        position.dy,
+        position.dx + 1,
+        position.dy + 1,
+      ),
       items: [
         PopupMenuItem(
           onTap: () => widget.onAddSubCategory?.call(null),
@@ -142,7 +146,10 @@ class _GalleryCategoryTreeViewState extends State<GalleryCategoryTreeView> {
   }
 
   Widget _buildCategoryNode(
-      ThemeData theme, GalleryCategory category, int depth) {
+    ThemeData theme,
+    GalleryCategory category,
+    int depth,
+  ) {
     final children = widget.categories.getChildren(category.id).sortedByOrder();
     final hasChildren = children.isNotEmpty;
     final isExpanded = _expandedIds.contains(category.id);
@@ -633,7 +640,11 @@ class _CategoryItemState extends State<_CategoryItem> {
     showMenu(
       context: context,
       position: RelativeRect.fromLTRB(
-          position.dx, position.dy, position.dx + 1, position.dy + 1),
+        position.dx,
+        position.dy,
+        position.dx + 1,
+        position.dy + 1,
+      ),
       items: [
         if (widget.onRename != null)
           PopupMenuItem(

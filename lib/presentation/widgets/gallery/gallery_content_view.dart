@@ -517,7 +517,9 @@ class LocalGalleryContentView extends ConsumerWidget {
     final selectionState = ref.watch(localGallerySelectionNotifierProvider);
 
     void showImageDetailViewer(
-        List<LocalImageRecord> images, int initialIndex) {
+      List<LocalImageRecord> images,
+      int initialIndex,
+    ) {
       bool getFavoriteStatus(String path) {
         final providerState = ref.read(localGalleryNotifierProvider);
         final image = providerState.currentImages
@@ -529,8 +531,10 @@ class LocalGalleryContentView extends ConsumerWidget {
       ImageDetailOpener.showMultipleImmediate(
         context,
         images: images
-            .map((r) =>
-                LocalImageDetailData(r, getFavoriteStatus: getFavoriteStatus))
+            .map(
+              (r) =>
+                  LocalImageDetailData(r, getFavoriteStatus: getFavoriteStatus),
+            )
             .toList(),
         initialIndex: initialIndex,
         showMetadataPanel: true,
