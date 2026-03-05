@@ -66,17 +66,17 @@ class ImageDragData {
 
 /// 构建图像拖拽预览 Widget
 ///
-/// 小而精美的设计，纵向长条形卡片
+/// 小而精美的设计，图片占满，名称作为底部覆层
 ///
 /// [theme] - 当前主题
 /// [dragData] - 拖拽数据
-/// [width] - 预览宽度，默认 72（更窄更精致）
+/// [width] - 预览宽度，默认 80
 /// [hintText] - 操作提示文字
 /// [showHint] - 是否显示操作提示
 Widget buildImageDragFeedback(
   ThemeData theme,
   ImageDragData dragData, {
-  double width = 72,
+  double width = 80,
   String? hintText,
   bool showHint = true,
 }) {
@@ -85,100 +85,127 @@ Widget buildImageDragFeedback(
   return Material(
     elevation: 8,
     shadowColor: Colors.black.withOpacity(0.3),
-    borderRadius: BorderRadius.circular(16),
+    borderRadius: BorderRadius.circular(12),
     child: Container(
       width: width,
-      // 固定总高度，确保紧凑
-      height: showHint ? 126 : 106,
+      height: showHint ? 108 : 92,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            colorScheme.surfaceContainerHighest,
-            colorScheme.surfaceContainerHigh,
-          ],
-        ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: colorScheme.primary.withOpacity(0.4),
           width: 1.5,
         ),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.max,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            // 图片区域（固定高度 80）
-            SizedBox(
-              height: 80,
-              child: _buildImageSection(theme, dragData),
-            ),
+            // 底层：图片占满整个卡片
+            _buildImageSection(theme, dragData),
             
-            // 信息区域（紧凑固定高度）
-            Container(
-              height: 26,
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-              decoration: BoxDecoration(
-                color: colorScheme.surface.withOpacity(0.7),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    dragData.fileName,
-                    style: TextStyle(
-                      fontSize: 8,
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.onSurface,
-                      height: 1.0,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    _formatFileSize(dragData.record.size),
-                    style: TextStyle(
-                      fontSize: 7,
-                      color: colorScheme.onSurfaceVariant.withOpacity(0.8),
-                      height: 1.0,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            // 提示区域（固定高度）
-            if (showHint)
-              Container(
-                height: 20,
-                padding: const EdgeInsets.symmetric(horizontal: 4),
+            // 中层：底部渐变遮罩（让文字更清晰）
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: showHint ? 20 : 0,
+              height: 36,
+              child: Container(
                 decoration: BoxDecoration(
-                  color: colorScheme.primary.withOpacity(0.12),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.7),
+                    ],
+                  ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+              ),
+            ),
+            
+            // 上层：文件名和大小（覆层在底部）
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: showHint ? 22 : 4,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      Icons.touch_app_rounded,
-                      size: 8,
-                      color: colorScheme.primary,
-                    ),
-                    const SizedBox(width: 2),
                     Text(
-                      hintText ?? '拖拽',
+                      dragData.fileName,
+                      style: TextStyle(
+                        fontSize: 8,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                        height: 1.1,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withOpacity(0.8),
+                            blurRadius: 2,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      _formatFileSize(dragData.record.size),
                       style: TextStyle(
                         fontSize: 7,
-                        color: colorScheme.primary,
-                        fontWeight: FontWeight.w600,
-                        height: 1.0,
+                        color: Colors.white.withOpacity(0.9),
+                        height: 1.1,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withOpacity(0.8),
+                            blurRadius: 2,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
                       ),
                     ),
                   ],
+                ),
+              ),
+            ),
+            
+            // 提示区域（固定在底部）
+            if (showHint)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  height: 20,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withOpacity(0.15),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.touch_app_rounded,
+                        size: 8,
+                        color: colorScheme.primary,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        hintText ?? '拖拽',
+                        style: TextStyle(
+                          fontSize: 7,
+                          color: colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                          height: 1.0,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
           ],
@@ -189,13 +216,14 @@ Widget buildImageDragFeedback(
 }
 
 /// 构建图片区域
+///
+/// 图片占满整个空间
 Widget _buildImageSection(ThemeData theme, ImageDragData dragData) {
   final colorScheme = theme.colorScheme;
   
   // 如果有预览数据或文件存在，显示图片
   if (dragData.previewBytes != null || 
       (dragData.path.isNotEmpty && File(dragData.path).existsSync())) {
-    // 直接返回图片，不添加额外的 ClipRRect，避免缝隙
     return _buildImageContent(dragData);
   }
   
@@ -205,8 +233,8 @@ Widget _buildImageSection(ThemeData theme, ImageDragData dragData) {
     height: double.infinity,
     decoration: BoxDecoration(
       gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
         colors: [
           colorScheme.surfaceContainerHighest,
           colorScheme.surfaceContainerHigh,
@@ -215,15 +243,15 @@ Widget _buildImageSection(ThemeData theme, ImageDragData dragData) {
     ),
     child: Center(
       child: Container(
-        width: 36,
-        height: 36,
+        width: 40,
+        height: 40,
         decoration: BoxDecoration(
           color: colorScheme.surface.withOpacity(0.5),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(
           dragData.isPng ? Icons.image_rounded : Icons.insert_drive_file_rounded,
-          size: 20,
+          size: 22,
           color: colorScheme.primary.withOpacity(0.6),
         ),
       ),
