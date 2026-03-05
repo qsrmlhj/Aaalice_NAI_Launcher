@@ -34,9 +34,6 @@ class DraggableImageCard extends StatefulWidget {
   final String? feedbackHint;
 
   /// 拖拽时原位置组件的透明度
-  /// 设置为 0.0 可完全隐藏原位置组件
-  /// 设置为 0.3-0.5 可显示半透明占位符
-  /// 设置为 1.0 则保持原样（默认行为）
   final double dragOpacity;
 
   const DraggableImageCard({
@@ -55,19 +52,6 @@ class DraggableImageCard extends StatefulWidget {
   State<DraggableImageCard> createState() => _DraggableImageCardState();
 
   /// 创建拖拽包装器函数
-  ///
-  /// 用于配合 [LocalImageCard3D.dragWrapper] 使用，将拖拽功能注入到卡片内部
-  /// 解决 GestureDetector 与 DragItemWidget 的手势冲突问题
-  ///
-  /// 使用示例：
-  /// ```dart
-  /// LocalImageCard3D(
-  ///   dragWrapper: DraggableImageCard.createDragWrapper(
-  ///     context: context,
-  ///     record: record,
-  ///   ),
-  /// )
-  /// ```
   static Widget Function(Widget child) createDragWrapper({
     required BuildContext context,
     required LocalImageRecord record,
@@ -77,24 +61,12 @@ class DraggableImageCard extends StatefulWidget {
     String? feedbackHint,
     double dragOpacity = 0.3,
   }) {
-    final theme = Theme.of(context);
-    final dragData = ImageDragData.fromRecord(
-      record,
-      previewBytes: previewBytes,
-    );
-
-    // 构建拖拽反馈 Widget
-    final feedbackWidget = buildImageDragFeedback(
-      theme,
-      dragData,
-      width: feedbackWidth,
-      hintText: feedbackHint ?? '拖拽以分享',
-    );
-
     return (Widget child) {
       return _DragWrapper(
-        dragData: dragData,
-        feedbackWidget: feedbackWidget,
+        record: record,
+        previewBytes: previewBytes,
+        feedbackWidth: feedbackWidth,
+        feedbackHint: feedbackHint,
         enableFeedback: enableFeedback,
         dragOpacity: dragOpacity,
         child: child,
@@ -105,21 +77,49 @@ class DraggableImageCard extends StatefulWidget {
 
 class _DraggableImageCardState extends State<DraggableImageCard> {
   bool _isDragging = false;
+  Uint8List? _imageBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadImage();
+  }
+
+  Future<void> _loadImage() async {
+    // 如果提供了预览数据，直接使用
+    if (widget.previewBytes != null) {
+      setState(() => _imageBytes = widget.previewBytes);
+      return;
+    }
+
+    // 异步加载图片
+    if (widget.record.path.isNotEmpty) {
+      try {
+        final file = File(widget.record.path);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          if (mounted) {
+            setState(() => _imageBytes = bytes);
+          }
+        }
+      } catch (e) {
+        debugPrint('Failed to load image: $e');
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    // 如果禁用拖拽，直接返回子组件
     if (!widget.enabled) {
       return widget.child;
     }
 
     final theme = Theme.of(context);
-    final dragData = ImageDragData.fromRecord(
-      widget.record,
-      previewBytes: widget.previewBytes,
+    final dragData = ImageDragData(
+      record: widget.record,
+      previewBytes: _imageBytes,
     );
 
-    // 构建拖拽反馈 Widget
     final feedbackWidget = buildImageDragFeedback(
       theme,
       dragData,
@@ -156,34 +156,21 @@ class _DraggableImageCardState extends State<DraggableImageCard> {
     );
   }
 
-  /// 创建拖拽项
-  ///
-  /// 根据图像数据创建包含 PNG 和 URI 格式的 DragItem
   Future<DragItem> _createDragItem(ImageDragData dragData) async {
     final fileName = dragData.fileName;
     final filePath = dragData.path;
 
-    // 创建拖拽项，建议文件名，并添加 localData 标识为内部拖拽
     final item = DragItem(
       suggestedName: fileName,
       localData: {'source': 'gallery_internal', 'path': filePath},
     );
 
-    // 添加 PNG 格式数据（如果文件是 PNG）
-    if (dragData.isPng) {
-      try {
-        final file = File(filePath);
-        if (await file.exists()) {
-          final bytes = await file.readAsBytes();
-          item.add(Formats.png(bytes));
-        }
-      } catch (e) {
-        // 如果读取失败，跳过 PNG 数据
-        debugPrint('Failed to read PNG file for drag: $e');
-      }
+    // 添加 PNG 格式数据
+    if (dragData.isPng && dragData.previewBytes != null) {
+      item.add(Formats.png(dragData.previewBytes!));
     }
 
-    // 添加文件 URI 格式（所有文件类型都支持）
+    // 添加文件 URI 格式
     try {
       final uri = Uri.file(filePath);
       item.add(Formats.fileUri(uri));
@@ -196,18 +183,20 @@ class _DraggableImageCardState extends State<DraggableImageCard> {
 }
 
 /// 内部拖拽包装组件
-///
-/// 用于 createDragWrapper 方法，提供拖拽状态管理和视觉反馈
 class _DragWrapper extends StatefulWidget {
-  final ImageDragData dragData;
-  final Widget feedbackWidget;
+  final LocalImageRecord record;
+  final Uint8List? previewBytes;
+  final double feedbackWidth;
+  final String? feedbackHint;
   final bool enableFeedback;
   final double dragOpacity;
   final Widget child;
 
   const _DragWrapper({
-    required this.dragData,
-    required this.feedbackWidget,
+    required this.record,
+    required this.previewBytes,
+    required this.feedbackWidth,
+    required this.feedbackHint,
     required this.enableFeedback,
     required this.dragOpacity,
     required this.child,
@@ -219,31 +208,51 @@ class _DragWrapper extends StatefulWidget {
 
 class _DragWrapperState extends State<_DragWrapper> {
   bool _isDragging = false;
+  Uint8List? _imageBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadImage();
+  }
+
+  Future<void> _loadImage() async {
+    if (widget.previewBytes != null) {
+      setState(() => _imageBytes = widget.previewBytes);
+      return;
+    }
+
+    if (widget.record.path.isNotEmpty) {
+      try {
+        final file = File(widget.record.path);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          if (mounted) {
+            setState(() => _imageBytes = bytes);
+          }
+        }
+      } catch (e) {
+        debugPrint('Failed to load image: $e');
+      }
+    }
+  }
 
   Future<DragItem> _createDragItem() async {
-    final fileName = widget.dragData.fileName;
-    final filePath = widget.dragData.path;
+    final fileName = widget.record.path.split(RegExp(r'[/\\]')).last;
+    final filePath = widget.record.path;
 
-    // 创建拖拽项，建议文件名，并添加 localData 标识为内部拖拽
     final item = DragItem(
       suggestedName: fileName,
       localData: {'source': 'gallery_internal', 'path': filePath},
     );
 
-    // 添加 PNG 格式数据（如果文件是 PNG）
-    if (widget.dragData.isPng) {
-      try {
-        final file = File(filePath);
-        if (await file.exists()) {
-          final bytes = await file.readAsBytes();
-          item.add(Formats.png(bytes));
-        }
-      } catch (e) {
-        debugPrint('Failed to read PNG file for drag: $e');
-      }
+    // 添加 PNG 格式数据
+    final extension = fileName.toLowerCase().split('.').last;
+    if (extension == 'png' && _imageBytes != null) {
+      item.add(Formats.png(_imageBytes!));
     }
 
-    // 添加文件 URI 格式（所有文件类型都支持）
+    // 添加文件 URI 格式
     try {
       final uri = Uri.file(filePath);
       item.add(Formats.fileUri(uri));
@@ -256,6 +265,19 @@ class _DragWrapperState extends State<_DragWrapper> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dragData = ImageDragData(
+      record: widget.record,
+      previewBytes: _imageBytes,
+    );
+
+    final feedbackWidget = buildImageDragFeedback(
+      theme,
+      dragData,
+      width: widget.feedbackWidth,
+      hintText: widget.feedbackHint ?? '拖拽以分享',
+    );
+
     return Listener(
       onPointerDown: (_) {
         setState(() => _isDragging = true);
@@ -270,10 +292,10 @@ class _DragWrapperState extends State<_DragWrapper> {
         allowedOperations: () => [DropOperation.copy],
         dragItemProvider: (request) => _createDragItem(),
         liftBuilder: widget.enableFeedback
-            ? (context, child) => widget.feedbackWidget
+            ? (context, child) => feedbackWidget
             : null,
         dragBuilder: widget.enableFeedback
-            ? (context, child) => widget.feedbackWidget
+            ? (context, child) => feedbackWidget
             : null,
         child: DraggableWidget(
           child: Opacity(
