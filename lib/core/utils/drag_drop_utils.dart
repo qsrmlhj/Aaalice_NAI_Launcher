@@ -66,175 +66,206 @@ class ImageDragData {
 
 /// 构建图像拖拽预览 Widget
 ///
-/// 基于 entry_list_item.dart 的 _buildDragFeedback 实现
+/// 小而精美的设计，纵向长条形卡片
 ///
 /// [theme] - 当前主题
 /// [dragData] - 拖拽数据
-/// [width] - 预览宽度，默认 100
-/// [hintText] - 操作提示文字，如 "拖拽到分类" 或 "拖拽以分享"
-/// [showHint] - 是否显示操作提示，默认 true
+/// [width] - 预览宽度，默认 72（更窄更精致）
+/// [hintText] - 操作提示文字
+/// [showHint] - 是否显示操作提示
 Widget buildImageDragFeedback(
   ThemeData theme,
   ImageDragData dragData, {
-  double width = 100,
+  double width = 72,
   String? hintText,
   bool showHint = true,
 }) {
+  final colorScheme = theme.colorScheme;
+  
   return Material(
-    elevation: 12,
-    borderRadius: BorderRadius.circular(10),
-    color: theme.colorScheme.surfaceContainerHigh,
-    shadowColor: Colors.black54,
+    // 柔和的阴影
+    elevation: 8,
+    shadowColor: Colors.black.withOpacity(0.3),
+    // 外层大圆角
+    borderRadius: BorderRadius.circular(16),
     child: Container(
       width: width,
-      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
+        // 渐变背景，增加质感
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            colorScheme.surfaceContainerHighest,
+            colorScheme.surfaceContainerHigh,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        // 细边框
         border: Border.all(
-          color: theme.colorScheme.primary.withOpacity(0.5),
-          width: 2,
+          color: colorScheme.primary.withOpacity(0.4),
+          width: 1.5,
         ),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 缩略图（上方大图）
-          _buildThumbnailLarge(theme, dragData),
-          const SizedBox(height: 8),
-          // 信息（下方）
-          Text(
-            dragData.fileName,
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              fontSize: 11,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.image_outlined,
-                size: 10,
-                color: theme.colorScheme.outline,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 图片区域（占主要空间）
+            _buildImageSection(theme, dragData),
+            
+            // 信息区域（紧凑）
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(6, 5, 6, 5),
+              decoration: BoxDecoration(
+                color: colorScheme.surface.withOpacity(0.7),
               ),
-              const SizedBox(width: 4),
-              Text(
-                _formatFileSize(dragData.record.size),
-                style: TextStyle(
-                  fontSize: 9,
-                  color: theme.colorScheme.outline,
-                ),
-              ),
-            ],
-          ),
-          // 操作提示
-          if (showHint) ...[
-            const SizedBox(height: 6),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.drive_file_move_outline,
-                  size: 10,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  hintText ?? '拖拽以分享',
-                  style: TextStyle(
-                    fontSize: 9,
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w500,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 文件名（截断显示）
+                  Text(
+                    dragData.fileName,
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurface,
+                      height: 1.1,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
                   ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  // 文件大小（更小的灰色文字）
+                  Text(
+                    _formatFileSize(dragData.record.size),
+                    style: TextStyle(
+                      fontSize: 7.5,
+                      color: colorScheme.onSurfaceVariant.withOpacity(0.8),
+                      height: 1,
+                    ),
+                  ),
+                ],
+              ),
             ),
+            
+            // 提示区域（迷你标签样式）
+            if (showHint)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+                decoration: BoxDecoration(
+                  color: colorScheme.primary.withOpacity(0.12),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.touch_app_rounded,
+                      size: 8,
+                      color: colorScheme.primary,
+                    ),
+                    const SizedBox(width: 2),
+                    Text(
+                      hintText ?? '拖拽',
+                      style: TextStyle(
+                        fontSize: 7.5,
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                        height: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
-        ],
+        ),
       ),
     ),
   );
 }
 
-/// 构建大尺寸缩略图（用于拖拽预览）
-///
-/// 优先使用预览字节数据，其次尝试从文件路径加载缩略图
-Widget _buildThumbnailLarge(ThemeData theme, ImageDragData dragData) {
-  const double imageSize = 80;
-
-  // 如果有预览字节数据，使用内存图像
-  if (dragData.previewBytes != null) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.memory(
-        dragData.previewBytes!,
-        width: imageSize,
-        height: imageSize,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          return _buildPlaceholderLarge(theme);
-        },
+/// 构建图片区域
+Widget _buildImageSection(ThemeData theme, ImageDragData dragData) {
+  final colorScheme = theme.colorScheme;
+  
+  // 如果有预览数据或文件存在，显示图片
+  if (dragData.previewBytes != null || 
+      (dragData.path.isNotEmpty && File(dragData.path).existsSync())) {
+    return Container(
+      width: double.infinity,
+      height: 72,
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(16),
+        ),
+        child: _buildImageContent(dragData),
       ),
     );
   }
-
-  // 尝试从文件路径加载缩略图
-  if (dragData.path.isNotEmpty) {
-    final file = File(dragData.path);
-    if (file.existsSync()) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.file(
-          file,
-          width: imageSize,
-          height: imageSize,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return _buildFileTypeIconLarge(theme, dragData);
-          },
-        ),
-      );
-    }
-  }
-
-  // 使用文件类型图标作为占位符
-  return _buildFileTypeIconLarge(theme, dragData);
-}
-
-/// 构建大尺寸占位符
-Widget _buildPlaceholderLarge(ThemeData theme) {
+  
+  // 占位符样式
   return Container(
-    width: 80,
-    height: 80,
+    width: double.infinity,
+    height: 72,
     decoration: BoxDecoration(
-      color: theme.colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(8),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          colorScheme.surfaceContainerHighest,
+          colorScheme.surfaceContainerHigh,
+        ],
+      ),
     ),
-    child: Icon(
-      Icons.broken_image,
-      size: 32,
-      color: theme.colorScheme.outline,
+    child: Center(
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: colorScheme.surface.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(
+          dragData.isPng ? Icons.image_rounded : Icons.insert_drive_file_rounded,
+          size: 20,
+          color: colorScheme.primary.withOpacity(0.6),
+        ),
+      ),
     ),
   );
 }
 
-/// 构建大尺寸文件类型图标
-Widget _buildFileTypeIconLarge(ThemeData theme, ImageDragData dragData) {
-  return Container(
-    width: 80,
-    height: 80,
-    decoration: BoxDecoration(
-      color: theme.colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(8),
-    ),
+/// 构建图片内容
+Widget _buildImageContent(ImageDragData dragData) {
+  if (dragData.previewBytes != null) {
+    return Image.memory(
+      dragData.previewBytes!,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => _buildErrorPlaceholder(),
+    );
+  }
+  
+  return Image.file(
+    File(dragData.path),
+    fit: BoxFit.cover,
+    errorBuilder: (_, __, ___) => _buildErrorPlaceholder(),
+  );
+}
+
+/// 错误占位符
+Widget _buildErrorPlaceholder() {
+  return Center(
     child: Icon(
-      dragData.isPng ? Icons.image : Icons.insert_drive_file,
-      size: 32,
-      color: theme.colorScheme.primary,
+      Icons.broken_image_rounded,
+      size: 24,
+      color: Colors.grey[400],
     ),
   );
 }
@@ -242,12 +273,12 @@ Widget _buildFileTypeIconLarge(ThemeData theme, ImageDragData dragData) {
 /// 格式化文件大小
 String _formatFileSize(int bytes) {
   if (bytes < 1024) {
-    return '$bytes B';
+    return '${bytes}B';
   } else if (bytes < 1024 * 1024) {
-    return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / 1024).toStringAsFixed(0)}KB';
   } else if (bytes < 1024 * 1024 * 1024) {
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
   } else {
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)}GB';
   }
 }
