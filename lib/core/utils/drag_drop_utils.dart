@@ -83,15 +83,14 @@ Widget buildImageDragFeedback(
   final colorScheme = theme.colorScheme;
   
   return Material(
-    // 柔和的阴影
     elevation: 8,
     shadowColor: Colors.black.withOpacity(0.3),
-    // 外层大圆角
     borderRadius: BorderRadius.circular(16),
     child: Container(
       width: width,
+      // 固定总高度，确保紧凑
+      height: showHint ? 126 : 106,
       decoration: BoxDecoration(
-        // 渐变背景，增加质感
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
@@ -101,7 +100,6 @@ Widget buildImageDragFeedback(
           ],
         ),
         borderRadius: BorderRadius.circular(16),
-        // 细边框
         border: Border.all(
           color: colorScheme.primary.withOpacity(0.4),
           width: 1.5,
@@ -110,26 +108,29 @@ Widget buildImageDragFeedback(
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.max,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 图片区域（占主要空间）
-            _buildImageSection(theme, dragData),
+            // 图片区域（固定高度 80）
+            SizedBox(
+              height: 80,
+              child: _buildImageSection(theme, dragData),
+            ),
             
-            // 信息区域（紧凑）
+            // 信息区域（紧凑固定高度）
             Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(6, 4, 6, 3),
+              height: 26,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
               decoration: BoxDecoration(
                 color: colorScheme.surface.withOpacity(0.7),
               ),
               child: Column(
-                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // 文件名（截断显示）
                   Text(
                     dragData.fileName,
                     style: TextStyle(
-                      fontSize: 9,
+                      fontSize: 8,
                       fontWeight: FontWeight.w600,
                       color: colorScheme.onSurface,
                       height: 1.0,
@@ -139,11 +140,10 @@ Widget buildImageDragFeedback(
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 1),
-                  // 文件大小（更小的灰色文字）
                   Text(
                     _formatFileSize(dragData.record.size),
                     style: TextStyle(
-                      fontSize: 7.5,
+                      fontSize: 7,
                       color: colorScheme.onSurfaceVariant.withOpacity(0.8),
                       height: 1.0,
                     ),
@@ -152,16 +152,13 @@ Widget buildImageDragFeedback(
               ),
             ),
             
-            // 提示区域（迷你标签样式）
+            // 提示区域（固定高度）
             if (showHint)
               Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
+                height: 20,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
                   color: colorScheme.primary.withOpacity(0.12),
-                  borderRadius: const BorderRadius.vertical(
-                    bottom: Radius.circular(16),
-                  ),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -175,24 +172,13 @@ Widget buildImageDragFeedback(
                     Text(
                       hintText ?? '拖拽',
                       style: TextStyle(
-                        fontSize: 7.5,
+                        fontSize: 7,
                         color: colorScheme.primary,
                         fontWeight: FontWeight.w600,
                         height: 1.0,
                       ),
                     ),
                   ],
-                ),
-              ),
-            // 如果没有提示，底部添加一个小的装饰性圆角遮罩
-            if (!showHint)
-              Container(
-                height: 4,
-                decoration: BoxDecoration(
-                  color: colorScheme.surface.withOpacity(0.7),
-                  borderRadius: const BorderRadius.vertical(
-                    bottom: Radius.circular(16),
-                  ),
                 ),
               ),
           ],
@@ -209,22 +195,14 @@ Widget _buildImageSection(ThemeData theme, ImageDragData dragData) {
   // 如果有预览数据或文件存在，显示图片
   if (dragData.previewBytes != null || 
       (dragData.path.isNotEmpty && File(dragData.path).existsSync())) {
-    return SizedBox(
-      width: double.infinity,
-      height: 80,
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(16),
-        ),
-        child: _buildImageContent(dragData),
-      ),
-    );
+    // 直接返回图片，不添加额外的 ClipRRect，避免缝隙
+    return _buildImageContent(dragData);
   }
   
   // 占位符样式
   return Container(
     width: double.infinity,
-    height: 80,
+    height: double.infinity,
     decoration: BoxDecoration(
       gradient: LinearGradient(
         begin: Alignment.topLeft,
