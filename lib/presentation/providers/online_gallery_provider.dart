@@ -6,6 +6,7 @@ import '../../core/utils/app_logger.dart';
 import '../../data/datasources/remote/danbooru_api_service.dart';
 import '../../data/models/online_gallery/danbooru_post.dart';
 import '../../data/services/danbooru_auth_service.dart';
+import 'online_gallery_blacklist_provider.dart';
 
 part 'online_gallery_provider.g.dart';
 
@@ -343,6 +344,11 @@ class OnlineGalleryNotifier extends _$OnlineGalleryNotifier {
 
     try {
       // 使用 order:rank 标签搜索实现排行榜功能（替代不稳定的 /explore 端点）
+      await ref
+          .read(onlineGalleryBlacklistNotifierProvider.notifier)
+          .ensureInitialized();
+      final blacklistTags =
+          ref.read(onlineGalleryBlacklistNotifierProvider).effectiveTags;
       final posts = await _apiService.searchPosts(
         tags: 'order:rank',
         page: page,
@@ -350,7 +356,10 @@ class OnlineGalleryNotifier extends _$OnlineGalleryNotifier {
       );
 
       // 过滤评级
-      final filteredPosts = _filterByRatings(posts, state.selectedRatings);
+      final filteredPosts = _filterByBlacklist(
+        _filterByRatings(posts, state.selectedRatings),
+        blacklistTags,
+      );
 
       // 更新缓存
       final newCache = ModeCache(
@@ -775,6 +784,38 @@ class OnlineGalleryNotifier extends _$OnlineGalleryNotifier {
     return posts.where((p) => normalized.contains(p.rating)).toList();
   }
 
+  List<DanbooruPost> _filterByBlacklist(
+    List<DanbooruPost> posts,
+    Set<String> blacklistTags,
+  ) {
+    if (blacklistTags.isEmpty) return posts;
+    return posts.where((post) {
+      for (final tag in post.tags) {
+        if (blacklistTags.contains(_normalizeTagForBlacklist(tag))) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+  }
+
+  String _appendBlacklistToQuery(String tags, Set<String> blacklistTags) {
+    if (blacklistTags.isEmpty) return tags;
+
+    // 请求级过滤仅做前置优化，本地过滤仍是最终兜底。
+    final querySafeTags = blacklistTags
+        .where((tag) => tag.isNotEmpty && !tag.contains(':') && !tag.startsWith('-'))
+        .take(50)
+        .toList();
+    final blacklistExpr = querySafeTags.map((tag) => '-$tag').join(' ');
+    if (blacklistExpr.isEmpty) return tags;
+    return tags.isEmpty ? blacklistExpr : '$tags $blacklistExpr';
+  }
+
+  String _normalizeTagForBlacklist(String input) {
+    return input.trim().toLowerCase().replaceAll(' ', '_');
+  }
+
   /// 将网络错误转换为用户友好的提示信息
   String _getNetworkErrorMessage(dynamic error) {
     if (error is DioException) {
@@ -810,8 +851,13 @@ class OnlineGalleryNotifier extends _$OnlineGalleryNotifier {
     required Set<String> selectedRatings,
     required dynamic page,
   }) async {
+    await ref
+        .read(onlineGalleryBlacklistNotifierProvider.notifier)
+        .ensureInitialized();
     final baseUrl = _getBaseUrl(source);
     final endpoint = _getEndpoint(source);
+    final blacklistTags =
+        ref.read(onlineGalleryBlacklistNotifierProvider).effectiveTags;
 
     // 构建标签查询
     String tags = query;
@@ -838,27 +884,47 @@ class OnlineGalleryNotifier extends _$OnlineGalleryNotifier {
       final dateTag = 'date:<=$endStr';
       tags = tags.isEmpty ? dateTag : '$tags $dateTag';
     }
+    final baseTags = tags;
+    final tagsWithBlacklist = _appendBlacklistToQuery(baseTags, blacklistTags);
 
     AppLogger.d(
-      'Fetching from $source: tags="$tags", page=$page',
+      'Fetching from $source: tags="$tagsWithBlacklist", page=$page',
       'OnlineGallery',
     );
 
-    final response = await _dio.get(
-      '$baseUrl$endpoint',
-      queryParameters: {
-        'tags': tags,
-        'page': page,
-        'limit': _pageSize,
-      },
-      options: Options(
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'NAI-Launcher/1.0',
+    Future<Response<dynamic>> requestWithTags(String requestTags) {
+      return _dio.get(
+        '$baseUrl$endpoint',
+        queryParameters: {
+          'tags': requestTags,
+          'page': page,
+          'limit': _pageSize,
         },
-      ),
-      cancelToken: _cancelToken,
-    );
+        options: Options(
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'NAI-Launcher/1.0',
+          },
+        ),
+        cancelToken: _cancelToken,
+      );
+    }
+
+    Response<dynamic> response;
+    try {
+      response = await requestWithTags(tagsWithBlacklist);
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      if (statusCode == 422 && blacklistTags.isNotEmpty) {
+        AppLogger.w(
+          '422 with blacklist query, fallback to request without blacklist and filter locally',
+          'OnlineGallery',
+        );
+        response = await requestWithTags(baseTags);
+      } else {
+        rethrow;
+      }
+    }
 
     if (response.data is List) {
       final rawList = response.data as List;
@@ -868,7 +934,10 @@ class OnlineGalleryNotifier extends _$OnlineGalleryNotifier {
         parsePostsInIsolate,
         {'rawList': rawList, 'source': source},
       );
-      final filteredPosts = _filterByRatings(posts, normalizedRatings);
+      final filteredPosts = _filterByBlacklist(
+        _filterByRatings(posts, normalizedRatings),
+        blacklistTags,
+      );
 
       AppLogger.d(
         'Fetched ${rawList.length} raw posts, ${filteredPosts.length} after filter',

@@ -23,6 +23,7 @@ import '../../providers/selection_mode_provider.dart';
 import '../../widgets/danbooru_login_dialog.dart';
 import '../../widgets/danbooru_post_card.dart';
 import '../../widgets/online_gallery/post_detail_dialog.dart';
+import '../../widgets/online_gallery/blacklist_settings_panel.dart';
 
 import '../../widgets/common/app_toast.dart';
 import '../../widgets/bulk_action_bar.dart';
@@ -547,6 +548,12 @@ class _OnlineGalleryScreenState extends ConsumerState<OnlineGalleryScreen>
           const SizedBox(width: 8),
           _buildDateRangeButton(theme, state),
         ],
+        const SizedBox(width: 8),
+        IconButton(
+          icon: const Icon(Icons.block),
+          tooltip: '黑名单标签',
+          onPressed: () => showOnlineGalleryBlacklistDialog(context, ref),
+        ),
         const SizedBox(width: 8),
         // 刷新按钮 (FilledButton.tonal)
         FilledButton.tonalIcon(
