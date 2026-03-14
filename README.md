@@ -1,7 +1,5 @@
 # NAI Launcher
 
-> Built with [pollinations.ai](https://pollinations.ai) for Prompt Assistant capabilities.
-
 <p align="center">
   <img src="assets/icons/Icon.png" alt="NAI Launcher Logo" width="120">
 </p>
