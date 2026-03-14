@@ -73,6 +73,12 @@ class GalleryImageRecord {
       };
 
   factory GalleryImageRecord.fromMap(Map<String, dynamic> map) {
+    final metadataStatusIndex = (map['metadata_status'] as num?)?.toInt() ?? 2;
+    final safeMetadataStatus = metadataStatusIndex >= 0 &&
+            metadataStatusIndex < MetadataStatus.values.length
+        ? MetadataStatus.values[metadataStatusIndex]
+        : MetadataStatus.none;
+
     return GalleryImageRecord(
       id: (map['id'] as num?)?.toInt(),
       filePath: map['file_path'] as String? ?? map['path'] as String? ?? '',
@@ -93,12 +99,12 @@ class GalleryImageRecord {
         (map['indexed_at'] as num?)?.toInt() ?? 0,
       ),
       lastScannedAt: map['last_scanned_at'] != null
-          ? DateTime.fromMillisecondsSinceEpoch((map['last_scanned_at'] as num).toInt())
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (map['last_scanned_at'] as num).toInt())
           : null,
       dateYmd: (map['date_ymd'] as num?)?.toInt() ?? 0,
       resolutionKey: map['resolution_key'] as String?,
-      metadataStatus:
-          MetadataStatus.values[(map['metadata_status'] as num?)?.toInt() ?? 2],
+      metadataStatus: safeMetadataStatus,
       isFavorite: (map['is_favorite'] as num?)?.toInt() == 1,
       isDeleted: (map['is_deleted'] as num?)?.toInt() == 1,
     );
@@ -633,17 +639,24 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     try {
       // 检查列是否存在
       final tableInfo = await db.rawQuery('PRAGMA table_info($_imagesTable)');
-      final hasColumn = tableInfo.any((col) => col['name'] == 'last_scanned_at');
-      
+      final hasColumn =
+          tableInfo.any((col) => col['name'] == 'last_scanned_at');
+
       if (!hasColumn) {
-        AppLogger.i('[Migration] Adding last_scanned_at column to $_imagesTable', 'GalleryDS');
-        await db.execute('ALTER TABLE $_imagesTable ADD COLUMN last_scanned_at INTEGER');
-        AppLogger.i('[Migration] last_scanned_at column added successfully', 'GalleryDS');
+        AppLogger.i(
+            '[Migration] Adding last_scanned_at column to $_imagesTable',
+            'GalleryDS');
+        await db.execute(
+            'ALTER TABLE $_imagesTable ADD COLUMN last_scanned_at INTEGER');
+        AppLogger.i('[Migration] last_scanned_at column added successfully',
+            'GalleryDS');
       } else {
-        AppLogger.d('[Migration] last_scanned_at column already exists', 'GalleryDS');
+        AppLogger.d(
+            '[Migration] last_scanned_at column already exists', 'GalleryDS');
       }
     } catch (e, stack) {
-      AppLogger.e('[Migration] Failed to add last_scanned_at column', e, stack, 'GalleryDS');
+      AppLogger.e('[Migration] Failed to add last_scanned_at column', e, stack,
+          'GalleryDS');
       // 迁移失败不应该阻止应用启动
     }
   }
@@ -938,15 +951,20 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           'is_deleted': 0,
         };
 
+        final id = existingId ??
+            await db.insert(
+              _imagesTable,
+              map,
+              conflictAlgorithm: ConflictAlgorithm.abort,
+            );
         if (existingId != null) {
-          map['id'] = existingId;
+          await db.update(
+            _imagesTable,
+            map,
+            where: 'id = ?',
+            whereArgs: [existingId],
+          );
         }
-
-        final id = await db.insert(
-          _imagesTable,
-          map,
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
 
         // 【优化】高频操作不记录，避免日志刷屏
         // AppLogger.d('Upserted image: $fileName (id=$id)', 'GalleryDS');
@@ -993,7 +1011,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       await execute(
         'updateFilePath',
         (db) async {
-          final fileName = newFileName ?? newPath.split(Platform.pathSeparator).last;
+          final fileName =
+              newFileName ?? newPath.split(Platform.pathSeparator).last;
 
           await db.update(
             _imagesTable,
@@ -1012,7 +1031,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         maxRetries: 3,
       );
 
-      AppLogger.d('Updated file path for image $imageId: $newPath', 'GalleryDS');
+      AppLogger.d(
+          'Updated file path for image $imageId: $newPath', 'GalleryDS');
     } catch (e, stack) {
       AppLogger.e(
         'Failed to update file path for image $imageId: $newPath',
@@ -1162,7 +1182,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
                     }
                   }
                 } catch (e, stack) {
-                  AppLogger.e('Failed to get images by IDs', e, stack, 'GalleryDS');
+                  AppLogger.e(
+                      'Failed to get images by IDs', e, stack, 'GalleryDS');
                 }
               },
               timeout: const Duration(seconds: 30),
@@ -1232,7 +1253,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
               [limit, offset],
             );
 
-            final records = results.map((row) => GalleryImageRecord.fromMap(row)).toList();
+            final records =
+                results.map((row) => GalleryImageRecord.fromMap(row)).toList();
 
             // 更新缓存
             _queryCache.put(cacheKey, records);
@@ -1303,7 +1325,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
 
         // 按批次处理
         for (var i = 0; i < records.length; i += batchSize) {
-          final end = (i + batchSize < records.length) ? i + batchSize : records.length;
+          final end =
+              (i + batchSize < records.length) ? i + batchSize : records.length;
           final batch = records.sublist(i, end);
           final batchIndex = i ~/ batchSize;
 
@@ -1359,15 +1382,20 @@ class GalleryDataSource extends EnhancedBaseDataSource {
                   'is_deleted': record.isDeleted ? 1 : 0,
                 };
 
+                final id = existingId ??
+                    await txn.insert(
+                      _imagesTable,
+                      map,
+                      conflictAlgorithm: ConflictAlgorithm.abort,
+                    );
                 if (existingId != null) {
-                  map['id'] = existingId;
+                  await txn.update(
+                    _imagesTable,
+                    map,
+                    where: 'id = ?',
+                    whereArgs: [existingId],
+                  );
                 }
-
-                final id = await txn.insert(
-                  _imagesTable,
-                  map,
-                  conflictAlgorithm: ConflictAlgorithm.replace,
-                );
 
                 batchIds.add(id);
               }
@@ -1459,7 +1487,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   }
 
   /// 按元数据状态统计图片数量
-  /// 
+  ///
   /// 返回一个 Map: {statusName: count}
   /// statusName: 'success', 'failed', 'none'
   Future<Map<String, int>> countImagesByMetadataStatus() async {
@@ -1474,30 +1502,32 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         AppLogger.d('[GalleryDS] Executing SQL: $sql', 'GalleryDS');
         final result = await db.rawQuery(sql);
         AppLogger.d('[GalleryDS] Query result: $result', 'GalleryDS');
-        
+
         final counts = <String, int>{
           'success': 0,
           'failed': 0,
           'none': 0,
         };
-        
+
         for (final row in result) {
           final statusIndex = row['metadata_status'] as int? ?? 2; // 2 = none
           final count = (row['count'] as num?)?.toInt() ?? 0;
-          
+
           final statusName = switch (statusIndex) {
             0 => 'success',
             1 => 'failed',
             _ => 'none',
           };
           counts[statusName] = count;
-          AppLogger.d('[GalleryDS] Status $statusIndex ($statusName): $count', 'GalleryDS');
+          AppLogger.d('[GalleryDS] Status $statusIndex ($statusName): $count',
+              'GalleryDS');
         }
-        
+
         AppLogger.i('[GalleryDS] Final counts: $counts', 'GalleryDS');
         return counts;
       } catch (e, stack) {
-        AppLogger.e('Failed to count images by metadata status', e, stack, 'GalleryDS');
+        AppLogger.e(
+            'Failed to count images by metadata status', e, stack, 'GalleryDS');
         return {'success': 0, 'failed': 0, 'none': 0};
       }
     });
@@ -1718,7 +1748,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       // 1. 先从 ImageMetadataService 获取（统一缓存）
       final imageRecord = await getImageById(imageId);
       if (imageRecord != null) {
-        final metadata = await ImageMetadataService().getMetadata(imageRecord.filePath);
+        final metadata =
+            await ImageMetadataService().getMetadata(imageRecord.filePath);
         if (metadata != null && metadata.hasData) {
           return GalleryMetadataRecord.fromNaiMetadata(imageId, metadata);
         }
@@ -2030,7 +2061,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
 
           return results;
         } catch (e, stack) {
-          AppLogger.e('Failed to search full text: $query', e, stack, 'GalleryDS');
+          AppLogger.e(
+              'Failed to search full text: $query', e, stack, 'GalleryDS');
           return [];
         }
       },
@@ -2133,18 +2165,21 @@ class GalleryDataSource extends EnhancedBaseDataSource {
 
           if (metadataStatuses != null && metadataStatuses.isNotEmpty) {
             final statusIndices = metadataStatuses
-                .map((s) => MetadataStatus.values.indexWhere((v) => v.name == s))
+                .map(
+                    (s) => MetadataStatus.values.indexWhere((v) => v.name == s))
                 .where((i) => i >= 0)
                 .toList();
             if (statusIndices.isNotEmpty) {
-              final placeholders = List.filled(statusIndices.length, '?').join(',');
+              final placeholders =
+                  List.filled(statusIndices.length, '?').join(',');
               conditions.add('i.metadata_status IN ($placeholders)');
               args.addAll(statusIndices);
             }
           }
 
           if (textSearchIds != null && textSearchIds.isNotEmpty) {
-            final placeholders = List.filled(textSearchIds.length, '?').join(',');
+            final placeholders =
+                List.filled(textSearchIds.length, '?').join(',');
             conditions.add('i.id IN ($placeholders)');
             args.addAll(textSearchIds);
           }
@@ -2321,7 +2356,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         stack,
         'GalleryDS',
       );
-      return {for (final id in imageIds) id: <String>[] };
+      return {for (final id in imageIds) id: <String>[]};
     }
   }
 
@@ -2422,7 +2457,9 @@ class GalleryDataSource extends EnhancedBaseDataSource {
                 ''',
               );
 
-              return results.map((row) => GalleryImageRecord.fromMap(row)).toList();
+              return results
+                  .map((row) => GalleryImageRecord.fromMap(row))
+                  .toList();
             },
             timeout: const Duration(seconds: 60),
             maxRetries: 3,

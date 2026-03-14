@@ -197,6 +197,11 @@ class StorageKeys {
   static const String enableCooccurrenceRecommendation =
       'enable_cooccurrence_recommendation';
 
+  // Prompt Assistant
+  static const String promptAssistantConfigJson = 'prompt_assistant_config_json';
+  static const String promptAssistantApiKeyPrefix =
+      'prompt_assistant_api_key_';
+
   // Danbooru 画师同步设置
   // 分类阈值配置（V2新增）
   static const String danbooruCategoryThresholds = 'danbooru_category_thresholds';

@@ -1,4 +1,8 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nai_launcher/core/utils/localization_extension.dart';
 
@@ -15,6 +19,12 @@ import '../../autocomplete/strategies/alias_strategy.dart';
 import '../../autocomplete/strategies/cooccurrence_strategy.dart';
 import '../../common/app_toast.dart';
 import '../../common/weight_adjust_toolbar.dart';
+import '../../../prompt_assistant/models/prompt_assistant_models.dart';
+import '../../../prompt_assistant/providers/prompt_assistant_config_provider.dart';
+import '../../../prompt_assistant/providers/prompt_assistant_history_provider.dart';
+import '../../../prompt_assistant/providers/prompt_assistant_state_provider.dart';
+import '../../../prompt_assistant/services/prompt_assistant_service.dart';
+import '../../../prompt_assistant/widgets/prompt_assistant_overlay.dart';
 import '../comfyui_import_wrapper.dart';
 import '../nai_syntax_controller.dart';
 import 'unified_prompt_config.dart';
@@ -64,6 +74,15 @@ class UnifiedPromptInput extends ConsumerStatefulWidget {
   /// 是否扩展填满空间
   final bool expands;
 
+  /// 输入框会话标识（用于历史栈隔离）
+  final String? sessionId;
+
+  /// 是否显示右下角助手
+  final bool enableAssistant;
+
+  /// 打开助手设置回调
+  final VoidCallback? onOpenAssistantSettings;
+
   /// ComfyUI 多角色导入回调
   ///
   /// 当用户确认导入 ComfyUI 格式的多角色提示词时触发。
@@ -83,6 +102,9 @@ class UnifiedPromptInput extends ConsumerStatefulWidget {
     this.maxLines,
     this.minLines,
     this.expands = false,
+    this.sessionId,
+    this.enableAssistant = true,
+    this.onOpenAssistantSettings,
     this.onComfyuiImport,
   });
 
@@ -102,6 +124,19 @@ class _UnifiedPromptInputState extends ConsumerState<UnifiedPromptInput> {
 
   /// 自动补全策略 Future（异步初始化）
   Future<AutocompleteStrategy>? _autocompleteStrategyFuture;
+  StreamSubscription<StreamingChunk>? _assistantStreamSub;
+  late final String _sessionId;
+
+  bool get _isDesktop {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.windows:
+      case TargetPlatform.macOS:
+      case TargetPlatform.linux:
+        return true;
+      default:
+        return false;
+    }
+  }
 
   /// 获取有效的文本控制器
   TextEditingController get _effectiveController {
@@ -119,6 +154,10 @@ class _UnifiedPromptInputState extends ConsumerState<UnifiedPromptInput> {
   @override
   void initState() {
     super.initState();
+    final providedSessionId = widget.sessionId?.trim();
+    _sessionId = (providedSessionId != null && providedSessionId.isNotEmpty)
+        ? providedSessionId
+        : 'prompt_${identityHashCode(this)}';
 
     // 初始化内部控制器（如果需要）
     if (widget.controller == null) {
@@ -188,6 +227,7 @@ class _UnifiedPromptInputState extends ConsumerState<UnifiedPromptInput> {
 
   @override
   void dispose() {
+    _assistantStreamSub?.cancel();
     _effectiveFocusNode.removeListener(_onFocusChanged);
     widget.controller?.removeListener(_syncFromExternalController);
     _internalController?.dispose();
@@ -196,10 +236,78 @@ class _UnifiedPromptInputState extends ConsumerState<UnifiedPromptInput> {
     super.dispose();
   }
 
+  Future<void> _runAssistantAction(AssistantTaskType taskType) async {
+    final text = _effectiveController.text.trim();
+    if (text.isEmpty) {
+      if (mounted) AppToast.warning(context, '请输入提示词后再操作');
+      return;
+    }
+
+    ref
+        .read(promptAssistantHistoryProvider.notifier)
+        .push(_sessionId, _effectiveController.text);
+
+    final stateNotifier = ref.read(promptAssistantStateProvider.notifier);
+    final label = taskType == AssistantTaskType.llm ? '优化中' : '翻译中';
+    stateNotifier.startProcessing(_sessionId, label);
+
+    final service = ref.read(promptAssistantServiceProvider);
+    final config = ref.read(promptAssistantConfigProvider);
+    final buffer = StringBuffer();
+
+    await _assistantStreamSub?.cancel();
+    final stream = taskType == AssistantTaskType.llm
+        ? service.optimizePrompt(
+            _effectiveController.text,
+            sessionId: _sessionId,
+          )
+        : service.translatePrompt(
+            _effectiveController.text,
+            sessionId: _sessionId,
+          );
+
+    _assistantStreamSub = stream.listen(
+      (chunk) {
+        if (chunk.done) return;
+        if (chunk.delta.isEmpty) return;
+        buffer.write(chunk.delta);
+        if (config.streamOutput) {
+          final nextText = buffer.toString();
+          if (nextText.isNotEmpty) {
+            _effectiveController.text = nextText;
+            _effectiveController.selection =
+                TextSelection.collapsed(offset: _effectiveController.text.length);
+          }
+        }
+      },
+      onError: (e) {
+        stateNotifier.setError(_sessionId, e.toString());
+        if (mounted) AppToast.error(context, '助手请求失败: $e');
+      },
+      onDone: () {
+        if (!config.streamOutput && buffer.isNotEmpty) {
+          final finalText = buffer.toString();
+          _effectiveController.text = finalText;
+          _effectiveController.selection =
+              TextSelection.collapsed(offset: _effectiveController.text.length);
+        }
+        stateNotifier.finishProcessing(_sessionId);
+        ref.read(promptAssistantHistoryProvider.notifier).push(
+              _sessionId,
+              _effectiveController.text,
+            );
+      },
+      cancelOnError: true,
+    );
+  }
+
   /// 焦点变化回调
   void _onFocusChanged() {
     if (!_effectiveFocusNode.hasFocus) {
       _formatOnBlur();
+      ref
+          .read(promptAssistantHistoryProvider.notifier)
+          .push(_sessionId, _effectiveController.text);
     }
   }
 
@@ -354,6 +462,7 @@ class _UnifiedPromptInputState extends ConsumerState<UnifiedPromptInput> {
 
   @override
   Widget build(BuildContext context) {
+    final assistantConfig = ref.watch(promptAssistantConfigProvider);
     Widget result = _buildTextField();
 
     // 如果启用 ComfyUI 导入，包装 ComfyuiImportWrapper
@@ -366,7 +475,40 @@ class _UnifiedPromptInputState extends ConsumerState<UnifiedPromptInput> {
       );
     }
 
-    return result;
+    return Focus(
+      onKeyEvent: (node, event) {
+        if (!_isDesktop ||
+            event is! KeyDownEvent ||
+            !widget.enableAssistant ||
+            !assistantConfig.enabled ||
+            !assistantConfig.desktopOverlayEnabled) {
+          return KeyEventResult.ignored;
+        }
+        final isCtrl = HardwareKeyboard.instance.isControlPressed;
+        final isShift = HardwareKeyboard.instance.isShiftPressed;
+        if (isCtrl && isShift && event.logicalKey == LogicalKeyboardKey.keyE) {
+          unawaited(_runAssistantAction(AssistantTaskType.llm));
+          return KeyEventResult.handled;
+        }
+        if (isCtrl && isShift && event.logicalKey == LogicalKeyboardKey.keyT) {
+          unawaited(_runAssistantAction(AssistantTaskType.translate));
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          result,
+          if (widget.enableAssistant)
+            PromptAssistantOverlay(
+              sessionId: _sessionId,
+              controller: _effectiveController,
+              onOpenSettings: widget.onOpenAssistantSettings,
+            ),
+        ],
+      ),
+    );
   }
 
   /// 构建文本输入框

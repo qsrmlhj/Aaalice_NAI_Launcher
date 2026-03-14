@@ -30,6 +30,7 @@ import '../../../widgets/prompt/uc_preset_selector.dart';
 import '../../../widgets/character/character_prompt_button.dart';
 import '../../../widgets/prompt/fixed_tags_button.dart';
 import '../../../providers/pending_prompt_provider.dart';
+import '../../../prompt_assistant/providers/prompt_assistant_config_provider.dart';
 
 /// Prompt 输入组件 (带自动补全)
 class PromptInputWidget extends ConsumerStatefulWidget {
@@ -315,6 +316,43 @@ class _PromptInputWidgetState extends ConsumerState<PromptInputWidget> {
     ref.read(characterPromptNotifierProvider.notifier).clearAllCharacters();
   }
 
+  void _openAssistantQuickSettings() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return Consumer(
+          builder: (context, ref, _) {
+            final config = ref.watch(promptAssistantConfigProvider);
+            final notifier = ref.read(promptAssistantConfigProvider.notifier);
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    title: const Text('启用提示词助手'),
+                    value: config.enabled,
+                    onChanged: notifier.setEnabled,
+                  ),
+                  SwitchListTile(
+                    title: const Text('桌面右下角浮层'),
+                    value: config.desktopOverlayEnabled,
+                    onChanged: notifier.setDesktopOverlayEnabled,
+                  ),
+                  SwitchListTile(
+                    title: const Text('流式输出'),
+                    value: config.streamOutput,
+                    onChanged: notifier.setStreamOutput,
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -588,6 +626,8 @@ class _PromptInputWidgetState extends ConsumerState<PromptInputWidget> {
     return UnifiedPromptInput(
       controller: _promptController,
       focusNode: _promptFocusNode,
+      sessionId: 'generation_prompt_main',
+      onOpenAssistantSettings: _openAssistantQuickSettings,
       config: UnifiedPromptConfig(
         enableSyntaxHighlight: enableHighlight,
         enableAutocomplete: enableAutocomplete,
@@ -689,6 +729,8 @@ class _PromptInputWidgetState extends ConsumerState<PromptInputWidget> {
     return UnifiedPromptInput(
       controller: _negativeController,
       focusNode: _negativeFocusNode,
+      sessionId: 'generation_prompt_negative',
+      onOpenAssistantSettings: _openAssistantQuickSettings,
       config: UnifiedPromptConfig(
         enableSyntaxHighlight: enableHighlight,
         enableAutocomplete: enableAutocomplete,
@@ -722,6 +764,8 @@ class _PromptInputWidgetState extends ConsumerState<PromptInputWidget> {
     return UnifiedPromptInput(
       controller: _promptController,
       focusNode: _promptFocusNode,
+      sessionId: 'generation_prompt_compact',
+      onOpenAssistantSettings: _openAssistantQuickSettings,
       config: UnifiedPromptConfig(
         enableSyntaxHighlight: enableHighlight,
         enableAutocomplete: enableAutocomplete,
