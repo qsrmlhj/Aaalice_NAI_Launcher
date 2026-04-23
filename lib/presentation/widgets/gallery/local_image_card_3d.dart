@@ -12,6 +12,7 @@ import '../../../core/utils/image_share_sanitizer.dart';
 import '../../../data/models/gallery/local_image_record.dart';
 import '../../../data/services/thumbnail_service.dart';
 import '../../providers/share_image_settings_provider.dart';
+import '../../services/image_workflow_launcher.dart';
 import '../../themes/theme_extension.dart';
 import '../common/app_toast.dart';
 import '../common/floating_action_buttons.dart';
@@ -192,6 +193,18 @@ class _LocalImageCard3DState extends ConsumerState<LocalImageCard3D>
 
   void _onHoverExit(PointerEvent event) {
     setState(() => _isHovered = false);
+  }
+
+  Future<void> _openUpscale() async {
+    try {
+      final bytes = await File(widget.record.path).readAsBytes();
+      if (mounted) {
+        ImageWorkflowLauncher.openUpscale(ref, bytes);
+        AppToast.info(context, '已载入图生图超分面板');
+      }
+    } catch (e) {
+      if (mounted) AppToast.error(context, '读取图像失败: $e');
+    }
   }
 
   Future<void> _copyImageToClipboard() async {
@@ -553,7 +566,7 @@ $image = [System.Drawing.Image]::FromFile("''';
         },
         onUpscale: () {
           Navigator.of(dialogContext).pop();
-          AppToast.info(dialogContext, '放大功能制作中');
+          _openUpscale();
         },
       ),
     );
@@ -890,8 +903,7 @@ class _SendToHomeMenu extends StatelessWidget {
                     context,
                     icon: Icons.zoom_in,
                     label: '放大',
-                    subtitle: '制作中',
-                    enabled: false,
+                    subtitle: '超分放大',
                     onTap: onUpscale,
                   ),
                 ],

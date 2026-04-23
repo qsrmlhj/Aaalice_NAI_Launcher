@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -5,6 +6,14 @@ import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+
+typedef ShareImagePrepareFunction = Future<SanitizedShareImage> Function(
+  Uint8List bytes, {
+  required String fileName,
+  required bool stripMetadata,
+});
+typedef ShareImageWriteTempFileFunction = Future<File> Function(
+    SanitizedShareImage image);
 
 class SanitizedShareImage {
   const SanitizedShareImage({
@@ -16,6 +25,94 @@ class SanitizedShareImage {
   final Uint8List bytes;
   final String fileName;
   final String mimeType;
+}
+
+class ShareImageTransferCache {
+  ShareImageTransferCache({
+    required this.imageBytes,
+    required this.fileName,
+    this.sourceFilePath,
+    ShareImagePrepareFunction? prepareImage,
+    ShareImageWriteTempFileFunction? writeTempFile,
+  })  : _prepareImage = prepareImage ??
+            ((bytes, {required fileName, required stripMetadata}) {
+              return ImageShareSanitizer.prepareForCopyOrDrag(
+                bytes,
+                fileName: fileName,
+                stripMetadata: stripMetadata,
+              );
+            }),
+        _writeTempFile =
+            writeTempFile ?? ImageShareSanitizer.writeTempShareFile;
+
+  final Uint8List imageBytes;
+  final String fileName;
+  final String? sourceFilePath;
+  final ShareImagePrepareFunction _prepareImage;
+  final ShareImageWriteTempFileFunction _writeTempFile;
+
+  final Map<bool, Future<SanitizedShareImage>> _preparedImages = {};
+  final Map<bool, Future<File>> _preparedFiles = {};
+  final Map<bool, File> _temporaryFiles = {};
+
+  Future<SanitizedShareImage> prepareImage({
+    required bool stripMetadata,
+  }) {
+    return _preparedImages.putIfAbsent(
+      stripMetadata,
+      () => _prepareImage(
+        imageBytes,
+        fileName: fileName,
+        stripMetadata: stripMetadata,
+      ),
+    );
+  }
+
+  Future<File> prepareFile({
+    required bool stripMetadata,
+  }) {
+    final sourceFile = _resolveSourceFile(stripMetadata: stripMetadata);
+    if (sourceFile != null) {
+      return Future.value(sourceFile);
+    }
+
+    return _preparedFiles.putIfAbsent(stripMetadata, () async {
+      final prepared = await prepareImage(stripMetadata: stripMetadata);
+      final file = await _writeTempFile(prepared);
+      _temporaryFiles[stripMetadata] = file;
+      return file;
+    });
+  }
+
+  void warmUp({required bool stripMetadata}) {
+    unawaited(prepareFile(stripMetadata: stripMetadata));
+  }
+
+  Future<void> dispose() async {
+    for (final file in _temporaryFiles.values) {
+      if (await file.exists()) {
+        try {
+          await file.delete();
+        } catch (_) {
+          // ignore cleanup failures in temp directory
+        }
+      }
+    }
+    _temporaryFiles.clear();
+  }
+
+  File? _resolveSourceFile({required bool stripMetadata}) {
+    if (stripMetadata) return null;
+    final normalizedSourceFilePath = sourceFilePath?.trim();
+    if (normalizedSourceFilePath == null || normalizedSourceFilePath.isEmpty) {
+      return null;
+    }
+    final sourceFile = File(normalizedSourceFilePath);
+    if (!sourceFile.existsSync()) {
+      return null;
+    }
+    return sourceFile;
+  }
 }
 
 class ImageShareSanitizer {

@@ -1,9 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../../../core/utils/image_share_sanitizer.dart';
 import '../../../core/utils/localization_extension.dart';
@@ -50,6 +50,9 @@ class SelectableImageCard extends ConsumerStatefulWidget {
   /// 编辑图像回调
   final VoidCallback? onEditImage;
 
+  /// 局部重绘回调
+  final VoidCallback? onInpaint;
+
   /// 生成变体回调
   final VoidCallback? onGenerateVariations;
 
@@ -61,6 +64,9 @@ class SelectableImageCard extends ConsumerStatefulWidget {
 
   /// 在文件夹中打开的回调（需要先保存图片）
   final VoidCallback? onOpenInExplorer;
+
+  /// 已保存源文件路径（用于复制/拖拽时复用源文件，避免重复写临时文件）。
+  final String? sourceFilePath;
 
   /// 保存到词库的回调（传入图像字节和合并后的提示词）
   final void Function(Uint8List imageBytes, String prompt)? onSaveToLibrary;
@@ -103,10 +109,12 @@ class SelectableImageCard extends ConsumerStatefulWidget {
     this.enableSelection = true,
     this.onUpscale,
     this.onEditImage,
+    this.onInpaint,
     this.onGenerateVariations,
     this.onDirectorTools,
     this.onEnhance,
     this.onOpenInExplorer,
+    this.sourceFilePath,
     this.onSaveToLibrary,
     // 生成中状态参数
     this.isGenerating = false,
@@ -138,6 +146,7 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
 
   // 防止重复点击打开多个详情页
   bool _isTapping = false;
+  ShareImageTransferCache? _shareTransferCache;
 
   @override
   void initState() {
@@ -154,6 +163,7 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
     if (widget.isGenerating) {
       _initGlowAnimation();
     }
+    _shareTransferCache = _createShareTransferCache();
   }
 
   void _initGlowAnimation() {
@@ -179,16 +189,30 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
       _glowController = null;
       _glowAnimation = null;
     }
+
+    if (oldWidget.imageBytes != widget.imageBytes ||
+        oldWidget.sourceFilePath != widget.sourceFilePath) {
+      final previousCache = _shareTransferCache;
+      _shareTransferCache = _createShareTransferCache();
+      if (previousCache != null) {
+        unawaited(previousCache.dispose());
+      }
+    }
   }
 
   @override
   void dispose() {
     _glossController.dispose();
     _glowController?.dispose();
+    final cache = _shareTransferCache;
+    if (cache != null) {
+      unawaited(cache.dispose());
+    }
     super.dispose();
   }
 
   void _onHoverEnter() {
+    _warmShareTransferCache();
     setState(() => _isHovering = true);
     if (widget.enableGlossEffect) {
       _glossController.forward(from: 0.0);
@@ -706,6 +730,12 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
                 tooltip: context.l10n.img2img_editImage,
                 onTap: widget.onEditImage,
               ),
+            if (widget.onInpaint != null)
+              _HoverActionButton(
+                icon: Icons.draw_outlined,
+                tooltip: context.l10n.img2img_inpaint,
+                onTap: widget.onInpaint,
+              ),
             if (widget.onGenerateVariations != null)
               _HoverActionButton(
                 icon: Icons.auto_awesome_motion_outlined,
@@ -809,21 +839,17 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
   }
 
   Future<void> _copyImage(BuildContext context) async {
-    File? tempFile;
     try {
       final stripMetadata =
           ref.read(shareImageSettingsProvider).stripMetadataForCopyAndDrag;
-      final shareImage = await ImageShareSanitizer.prepareForCopyOrDrag(
-        widget.imageBytes!,
-        fileName: 'generated.png',
+      final cache = _shareTransferCache ?? _createShareTransferCache();
+      if (cache == null) {
+        throw StateError('图像数据不可用，无法复制');
+      }
+      _shareTransferCache = cache;
+      final transferFile = await cache.prepareFile(
         stripMetadata: stripMetadata,
       );
-
-      final tempDir = await getTemporaryDirectory();
-      tempFile = File(
-        '${tempDir.path}/NAI_${DateTime.now().millisecondsSinceEpoch}_${shareImage.fileName}',
-      );
-      await tempFile.writeAsBytes(shareImage.bytes, flush: true);
 
       // 使用 PowerShell 复制图像到剪贴板
       // 使用 [System.Windows.Forms.Clipboard]::SetImage() 正确复制图像数据
@@ -832,7 +858,7 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
         '-ExecutionPolicy',
         'Bypass',
         '-Command',
-        'Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; \$image = [System.Drawing.Image]::FromFile("${tempFile.path}"); [System.Windows.Forms.Clipboard]::SetImage(\$image); \$image.Dispose();',
+        'Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; \$image = [System.Drawing.Image]::FromFile("${transferFile.path}"); [System.Windows.Forms.Clipboard]::SetImage(\$image); \$image.Dispose();',
       ]);
 
       // 检查 PowerShell 命令执行结果
@@ -853,16 +879,27 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
       if (context.mounted) {
         AppToast.error(context, '复制失败: $e');
       }
-    } finally {
-      // 清理临时文件
-      if (tempFile != null && await tempFile.exists()) {
-        try {
-          await tempFile.delete();
-        } catch (_) {
-          // 忽略删除错误
-        }
-      }
     }
+  }
+
+  ShareImageTransferCache? _createShareTransferCache() {
+    final imageBytes = widget.imageBytes;
+    if (imageBytes == null) {
+      return null;
+    }
+    return ShareImageTransferCache(
+      imageBytes: imageBytes,
+      fileName: 'generated.png',
+      sourceFilePath: widget.sourceFilePath,
+    );
+  }
+
+  void _warmShareTransferCache() {
+    final cache = _shareTransferCache;
+    if (cache == null) return;
+    final stripMetadata =
+        ref.read(shareImageSettingsProvider).stripMetadataForCopyAndDrag;
+    cache.warmUp(stripMetadata: stripMetadata);
   }
 
   Future<void> _saveToLibrary(BuildContext context) async {
@@ -897,9 +934,11 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
         ),
       ],
       if (widget.onEditImage != null ||
+          widget.onInpaint != null ||
           widget.onGenerateVariations != null ||
           widget.onDirectorTools != null ||
-          widget.onEnhance != null) ...[
+          widget.onEnhance != null ||
+          widget.onUpscale != null) ...[
         const ProMenuItem.divider(),
         if (widget.onEditImage != null)
           ProMenuItem(
@@ -907,6 +946,13 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
             label: context.l10n.img2img_editImage,
             icon: Icons.edit_outlined,
             onTap: widget.onEditImage!,
+          ),
+        if (widget.onInpaint != null)
+          ProMenuItem(
+            id: 'inpaint',
+            label: context.l10n.img2img_inpaint,
+            icon: Icons.draw_outlined,
+            onTap: widget.onInpaint!,
           ),
         if (widget.onGenerateVariations != null)
           ProMenuItem(
@@ -928,6 +974,13 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
             label: context.l10n.img2img_enhance,
             icon: Icons.auto_awesome_outlined,
             onTap: widget.onEnhance!,
+          ),
+        if (widget.onUpscale != null)
+          ProMenuItem(
+            id: 'upscale',
+            label: context.l10n.image_upscale,
+            icon: Icons.zoom_out_map_rounded,
+            onTap: widget.onUpscale!,
           ),
       ],
     ];

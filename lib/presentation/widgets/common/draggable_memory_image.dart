@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -41,11 +42,13 @@ class DraggableMemoryImage extends ConsumerStatefulWidget {
 class _DraggableMemoryImageState extends ConsumerState<DraggableMemoryImage> {
   bool _isDragging = false;
   late ImageProvider _previewProvider;
+  late ShareImageTransferCache _transferCache;
 
   @override
   void initState() {
     super.initState();
     _previewProvider = MemoryImage(widget.imageBytes);
+    _transferCache = _createTransferCache();
   }
 
   @override
@@ -54,6 +57,19 @@ class _DraggableMemoryImageState extends ConsumerState<DraggableMemoryImage> {
     if (oldWidget.imageBytes != widget.imageBytes) {
       _previewProvider = MemoryImage(widget.imageBytes);
     }
+    if (oldWidget.imageBytes != widget.imageBytes ||
+        oldWidget.fileName != widget.fileName ||
+        oldWidget.sourceFilePath != widget.sourceFilePath) {
+      final previousCache = _transferCache;
+      _transferCache = _createTransferCache();
+      unawaited(previousCache.dispose());
+    }
+  }
+
+  @override
+  void dispose() {
+    unawaited(_transferCache.dispose());
+    super.dispose();
   }
 
   @override
@@ -72,6 +88,7 @@ class _DraggableMemoryImageState extends ConsumerState<DraggableMemoryImage> {
     );
 
     return Listener(
+      onPointerHover: (_) => _warmTransferCache(),
       onPointerDown: (_) => setState(() => _isDragging = true),
       onPointerUp: (_) => setState(() => _isDragging = false),
       onPointerCancel: (_) => setState(() => _isDragging = false),
@@ -103,24 +120,48 @@ class _DraggableMemoryImageState extends ConsumerState<DraggableMemoryImage> {
   }
 
   Future<DragItem> _createDragItem() async {
-    final stripMetadata = ref
-        .read(shareImageSettingsProvider)
-        .stripMetadataForCopyAndDrag;
-    final image = await prepareDragImageForTransfer(
-      imageBytes: widget.imageBytes,
-      fileName: widget.fileName,
-      stripMetadata: stripMetadata,
-      sourceFilePath: widget.sourceFilePath,
-    );
+    final stripMetadata =
+        ref.read(shareImageSettingsProvider).stripMetadataForCopyAndDrag;
 
     final item = DragItem(
-      suggestedName: image.fileName,
+      suggestedName: widget.fileName,
       localData: {'source': 'history_internal'},
     );
+
+    final sourceFilePath = widget.sourceFilePath?.trim();
+    final hasReusableSourceFile = !stripMetadata &&
+        sourceFilePath != null &&
+        sourceFilePath.isNotEmpty &&
+        await File(sourceFilePath).exists();
+
+    if (hasReusableSourceFile) {
+      item.add(Formats.fileUri(Uri.file(sourceFilePath)));
+      return item;
+    }
+
+    final image = await _transferCache.prepareImage(
+      stripMetadata: stripMetadata,
+    );
     item.add(Formats.png(image.bytes));
-    final tempFile = await ImageShareSanitizer.writeTempShareFile(image);
-    item.add(Formats.fileUri(tempFile.uri));
+    final transferFile = await _transferCache.prepareFile(
+      stripMetadata: stripMetadata,
+    );
+    item.add(Formats.fileUri(transferFile.uri));
     return item;
+  }
+
+  ShareImageTransferCache _createTransferCache() {
+    return ShareImageTransferCache(
+      imageBytes: widget.imageBytes,
+      fileName: widget.fileName,
+      sourceFilePath: widget.sourceFilePath,
+    );
+  }
+
+  void _warmTransferCache() {
+    final stripMetadata =
+        ref.read(shareImageSettingsProvider).stripMetadataForCopyAndDrag;
+    _transferCache.warmUp(stripMetadata: stripMetadata);
   }
 }
 
