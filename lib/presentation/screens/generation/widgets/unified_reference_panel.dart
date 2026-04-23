@@ -14,10 +14,12 @@ import '../../../widgets/common/themed_divider.dart';
 import '../../../../data/models/vibe/vibe_library_entry.dart';
 import '../../../../data/models/vibe/vibe_reference.dart';
 import '../../../../data/services/vibe_library_storage_service.dart';
+import '../../../providers/generation/generation_params_selectors.dart';
 import '../../../providers/image_generation_provider.dart';
 import '../../../providers/vibe_library_provider.dart';
 import '../../../widgets/common/app_toast.dart';
 import '../../../widgets/common/collapsible_image_panel.dart';
+import '../../../widgets/common/decoded_memory_image.dart';
 import 'vibe_transfer_content.dart';
 import '../handlers/vibe_import_handler.dart';
 import '../handlers/vibe_export_handler.dart';
@@ -56,22 +58,6 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
     _loadRecentEntries();
     _loadRecentCollapsedState();
     _restoreGenerationState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      unawaited(_warmUpVibeLibraryCache());
-    });
-  }
-
-  Future<void> _warmUpVibeLibraryCache() async {
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-    if (!mounted) return;
-
-    final state = ref.read(vibeLibraryNotifierProvider);
-    if (state.entries.isNotEmpty || state.isInitializing || state.isLoading) {
-      return;
-    }
-
-    await ref.read(vibeLibraryNotifierProvider.notifier).loadFromCache();
   }
 
   /// 加载最近使用区域的折叠状态
@@ -269,8 +255,10 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final params = ref.watch(generationParamsNotifierProvider);
-    final vibes = params.vibeReferencesV4;
+    final panelData = ref.watch(
+      generationParamsNotifierProvider.select(selectVibePanelViewData),
+    );
+    final vibes = panelData.vibes;
     final hasVibes = vibes.isNotEmpty;
     final showBackground = hasVibes && !_isExpanded;
 
@@ -296,7 +284,7 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Text(
-          '${params.vibeReferencesV4.length}/16',
+          '${vibes.length}/16',
           style: theme.textTheme.labelSmall?.copyWith(
             color: showBackground
                 ? Colors.white
@@ -312,7 +300,7 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
             const ThemedDivider(),
             VibeTransferContent(
               vibes: vibes,
-              params: params,
+              normalizeVibeStrength: panelData.normalizeVibeStrength,
               showBackground: showBackground,
               onAddVibe: _addVibe,
               onAddLibraryVibe: _addLibraryVibe,
@@ -344,7 +332,13 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
         .map((vibe) => vibe.rawImageData ?? vibe.thumbnail)
         .where((data) => data != null)
         .cast<Uint8List>()
-        .map((data) => Image.memory(data, fit: BoxFit.cover))
+        .map(
+          (data) => DecodedMemoryImage(
+            bytes: data,
+            fit: BoxFit.cover,
+            decodeScale: 0.5,
+          ),
+        )
         .toList();
 
     if (imageWidgets.isEmpty) {

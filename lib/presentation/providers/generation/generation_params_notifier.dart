@@ -369,16 +369,17 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
     var vibeToAdd = vibe;
 
     // 检查是否是原始图片且需要编码
-    if (vibe.sourceType == VibeSourceType.rawImage &&
-        vibe.vibeEncoding.isEmpty &&
-        vibe.rawImageData != null) {
-      // 计算图片哈希
-      final imageHash = _calculateImageHash(vibe.rawImageData!);
+    if (vibe.canReencodeFromRawSource && vibe.vibeEncoding.isEmpty) {
+      final cacheKey = _buildVibeEncodingCacheKey(
+        vibe.rawImageData!,
+        model: state.model,
+        informationExtracted: vibe.infoExtracted,
+      );
 
       // 检查缓存
-      if (_vibeEncodingCache.containsKey(imageHash)) {
+      if (_vibeEncodingCache.containsKey(cacheKey)) {
         // 缓存命中 - 使用缓存的编码
-        final cachedEncoding = _vibeEncodingCache[imageHash]!;
+        final cachedEncoding = _vibeEncodingCache[cacheKey]!;
         AppLogger.i(
           'Vibe 编码缓存命中: ${vibe.displayName}',
           'VibeCache',
@@ -392,6 +393,8 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
       }
     }
 
+    _primeVibeEncodingCache(vibeToAdd);
+
     state = state.copyWith(
       vibeReferencesV4: [...state.vibeReferencesV4, vibeToAdd],
     );
@@ -402,6 +405,81 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
   String _calculateImageHash(Uint8List imageData) {
     final bytes = sha256.convert(imageData).bytes;
     return base64Encode(bytes);
+  }
+
+  String _buildVibeEncodingCacheKey(
+    Uint8List imageData, {
+    required String model,
+    required double informationExtracted,
+  }) {
+    final imageHash = _calculateImageHash(imageData);
+    final sanitizedInfoExtracted =
+        VibeReference.sanitizeInfoExtracted(informationExtracted);
+    return '$imageHash|$model|$sanitizedInfoExtracted';
+  }
+
+  String? getCachedVibeEncoding(
+    Uint8List imageData, {
+    String? model,
+    required double informationExtracted,
+  }) {
+    final cacheKey = _buildVibeEncodingCacheKey(
+      imageData,
+      model: model ?? state.model,
+      informationExtracted: informationExtracted,
+    );
+    return _vibeEncodingCache[cacheKey];
+  }
+
+  void _primeVibeEncodingCache(
+    VibeReference vibe, {
+    String? model,
+  }) {
+    final rawImageData = vibe.rawImageData;
+    if (rawImageData == null ||
+        rawImageData.isEmpty ||
+        vibe.vibeEncoding.isEmpty) {
+      return;
+    }
+
+    final cacheKey = _buildVibeEncodingCacheKey(
+      rawImageData,
+      model: model ?? state.model,
+      informationExtracted: vibe.infoExtracted,
+    );
+    _vibeEncodingCache.putIfAbsent(cacheKey, () => vibe.vibeEncoding);
+  }
+
+  bool _isSameVibeSource(VibeReference left, VibeReference right) {
+    if (left.vibeEncoding.isNotEmpty && right.vibeEncoding.isNotEmpty) {
+      return left.vibeEncoding == right.vibeEncoding;
+    }
+
+    if (left.rawImageData != null && right.rawImageData != null) {
+      return _calculateImageHash(left.rawImageData!) ==
+          _calculateImageHash(right.rawImageData!);
+    }
+
+    return left.displayName == right.displayName &&
+        left.bundleSource == right.bundleSource;
+  }
+
+  bool _isSameVibeList(
+    List<VibeReference> left,
+    List<VibeReference> right,
+  ) {
+    if (identical(left, right)) {
+      return true;
+    }
+    if (left.length != right.length) {
+      return false;
+    }
+    for (var i = 0; i < left.length; i++) {
+      if (!_isSameVibeSource(left[i], right[i])) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// 显示缓存命中通知
@@ -427,17 +505,20 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
     double informationExtracted = 1.0,
     String? vibeName,
   }) async {
-    // 计算图片哈希
-    final imageHash = _calculateImageHash(imageData);
+    final cacheKey = _buildVibeEncodingCacheKey(
+      imageData,
+      model: model,
+      informationExtracted: informationExtracted,
+    );
 
     // 检查缓存
-    if (_vibeEncodingCache.containsKey(imageHash)) {
+    if (_vibeEncodingCache.containsKey(cacheKey)) {
       AppLogger.i(
         'Vibe 编码缓存命中: ${vibeName ?? 'unknown'}',
         'VibeCache',
       );
       _showCacheHitNotification(vibeName ?? 'unknown');
-      return _vibeEncodingCache[imageHash];
+      return _vibeEncodingCache[cacheKey];
     }
 
     // 缓存未命中，调用 API
@@ -450,7 +531,7 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
       );
 
       // 存入缓存
-      _vibeEncodingCache[imageHash] = encoding;
+      _vibeEncodingCache[cacheKey] = encoding;
       AppLogger.i(
         'Vibe 编码已缓存: ${vibeName ?? 'unknown'}',
         'VibeCache',
@@ -472,9 +553,18 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
   ///
   /// [imageData] 原始图片数据
   /// [encoding] 编码后的 vibe 字符串
-  void storeVibeEncodingInCache(Uint8List imageData, String encoding) {
-    final imageHash = _calculateImageHash(imageData);
-    _vibeEncodingCache[imageHash] = encoding;
+  void storeVibeEncodingInCache(
+    Uint8List imageData,
+    String encoding, {
+    String? model,
+    double informationExtracted = 0.7,
+  }) {
+    final cacheKey = _buildVibeEncodingCacheKey(
+      imageData,
+      model: model ?? state.model,
+      informationExtracted: informationExtracted,
+    );
+    _vibeEncodingCache[cacheKey] = encoding;
     AppLogger.d(
       'Vibe 编码已手动存入缓存，当前缓存大小: ${_vibeEncodingCache.length}',
       'VibeCache',
@@ -483,6 +573,121 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
 
   /// 获取缓存大小
   int get vibeEncodingCacheSize => _vibeEncodingCache.length;
+
+  Future<List<VibeReference>> ensureVibeReferencesEncoded(
+    List<VibeReference> vibes, {
+    String? model,
+    bool syncCurrentState = true,
+  }) async {
+    if (vibes.isEmpty) {
+      return vibes;
+    }
+
+    final resolvedModel = model ?? state.model;
+    var changed = false;
+    final encodedVibes = <VibeReference>[];
+
+    for (final vibe in vibes) {
+      if (!vibe.canReencodeFromRawSource || vibe.vibeEncoding.isNotEmpty) {
+        encodedVibes.add(vibe);
+        continue;
+      }
+
+      final rawImageData = vibe.rawImageData;
+      if (rawImageData == null) {
+        encodedVibes.add(vibe);
+        continue;
+      }
+
+      final cachedEncoding = getCachedVibeEncoding(
+        rawImageData,
+        model: resolvedModel,
+        informationExtracted: vibe.infoExtracted,
+      );
+      if (cachedEncoding != null && cachedEncoding.isNotEmpty) {
+        encodedVibes.add(vibe.copyWith(vibeEncoding: cachedEncoding));
+        changed = true;
+        continue;
+      }
+
+      final encoding = await encodeVibeWithCache(
+        rawImageData,
+        model: resolvedModel,
+        informationExtracted: vibe.infoExtracted,
+        vibeName: vibe.displayName,
+      );
+      if (encoding != null && encoding.isNotEmpty) {
+        encodedVibes.add(vibe.copyWith(vibeEncoding: encoding));
+        changed = true;
+      } else {
+        encodedVibes.add(vibe);
+      }
+    }
+
+    if (changed &&
+        syncCurrentState &&
+        _isSameVibeList(state.vibeReferencesV4, vibes)) {
+      state = state.copyWith(vibeReferencesV4: encodedVibes);
+      _scheduleGenerationStateSave(immediate: true);
+    }
+
+    return changed ? encodedVibes : vibes;
+  }
+
+  /// 为库内“显式保存参数”准备持久化后的 Vibe 数据。
+  ///
+  /// 只有用户明确点击保存时才应调用这条链。若当前条目可重新编码，且：
+  /// 1. 还没有编码，或
+  /// 2. 信息提取发生变化
+  /// 则会先生成新编码，再返回用于落文件的完整 Vibe 数据。
+  Future<VibeReference?> prepareVibeForLibraryParamSave(
+    VibeReference vibe, {
+    required double strength,
+    required double infoExtracted,
+    String? model,
+  }) async {
+    final resolvedModel = model ?? state.model;
+    final nextStrength = VibeReference.sanitizeStrength(strength);
+    final nextInfoExtracted =
+        VibeReference.sanitizeInfoExtracted(infoExtracted);
+    var nextVibe = vibe.copyWith(
+      strength: nextStrength,
+      infoExtracted: nextInfoExtracted,
+    );
+
+    final shouldEncode = nextVibe.canReencodeFromRawSource &&
+        (nextVibe.vibeEncoding.isEmpty ||
+            nextInfoExtracted != vibe.infoExtracted);
+    if (!shouldEncode) {
+      return nextVibe;
+    }
+
+    final rawImageData = nextVibe.rawImageData;
+    if (rawImageData == null || rawImageData.isEmpty) {
+      return nextVibe;
+    }
+
+    final cachedEncoding = getCachedVibeEncoding(
+      rawImageData,
+      model: resolvedModel,
+      informationExtracted: nextInfoExtracted,
+    );
+    final encoding = cachedEncoding ??
+        await encodeVibeWithCache(
+          rawImageData,
+          model: resolvedModel,
+          informationExtracted: nextInfoExtracted,
+          vibeName: nextVibe.displayName,
+        );
+    if (encoding == null || encoding.isEmpty) {
+      return null;
+    }
+
+    return nextVibe.copyWith(
+      vibeEncoding: encoding,
+      sourceType: VibeSourceType.naiv4vibe,
+    );
+  }
 
   /// 清空编码缓存
   void clearVibeEncodingCache() {
@@ -531,6 +736,10 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
     // 限制最多 16 个（如果超过，保留后 16 个）
     if (newVibes.length > 16) {
       newVibes = newVibes.sublist(newVibes.length - 16);
+    }
+
+    for (final vibe in newVibes) {
+      _primeVibeEncodingCache(vibe);
     }
 
     // 更新状态
@@ -588,10 +797,32 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
     if (index < 0 || index >= state.vibeReferencesV4.length) return;
     final newList = [...state.vibeReferencesV4];
     final current = newList[index];
+    final nextStrength = strength != null
+        ? VibeReference.sanitizeStrength(strength)
+        : current.strength;
+    final nextInfoExtracted = infoExtracted != null
+        ? VibeReference.sanitizeInfoExtracted(infoExtracted)
+        : current.infoExtracted;
+    final infoChanged = nextInfoExtracted != current.infoExtracted;
+    String nextEncoding;
+    if (vibeEncoding != null) {
+      nextEncoding = vibeEncoding;
+    } else if (infoChanged && current.canReencodeFromRawSource) {
+      final rawImageData = current.rawImageData;
+      final cachedEncoding = rawImageData == null
+          ? null
+          : getCachedVibeEncoding(
+              rawImageData,
+              informationExtracted: nextInfoExtracted,
+            );
+      nextEncoding = cachedEncoding ?? '';
+    } else {
+      nextEncoding = current.vibeEncoding;
+    }
     newList[index] = current.copyWith(
-      strength: strength ?? current.strength,
-      infoExtracted: infoExtracted ?? current.infoExtracted,
-      vibeEncoding: vibeEncoding ?? current.vibeEncoding,
+      strength: nextStrength,
+      infoExtracted: nextInfoExtracted,
+      vibeEncoding: nextEncoding,
     );
     state = state.copyWith(vibeReferencesV4: newList);
     _scheduleGenerationStateSave();
@@ -607,6 +838,9 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
   void setVibeReferences(List<VibeReference> vibes) {
     // 限制最多 16 个
     final limitedVibes = vibes.take(16).toList();
+    for (final vibe in limitedVibes) {
+      _primeVibeEncodingCache(vibe);
+    }
     state = state.copyWith(vibeReferencesV4: limitedVibes);
     _scheduleGenerationStateSave(immediate: true);
   }
@@ -968,6 +1202,10 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
             ),
           );
         }
+      }
+
+      for (final vibe in restoredVibes) {
+        _primeVibeEncodingCache(vibe);
       }
 
       // 更新状态

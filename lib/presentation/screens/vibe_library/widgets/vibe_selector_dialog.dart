@@ -10,6 +10,37 @@ import '../../../../presentation/providers/vibe_library_provider.dart';
 import '../../../widgets/common/decoded_memory_image.dart';
 import 'vibe_card.dart';
 
+const int _topTagEntrySampleLimit = 40;
+const int _topTagDisplayLimit = 6;
+
+List<String> computeInitialTopTags(
+  List<VibeLibraryEntry> entries, {
+  int entrySampleLimit = _topTagEntrySampleLimit,
+  int displayLimit = _topTagDisplayLimit,
+}) {
+  if (entries.isEmpty || entrySampleLimit <= 0 || displayLimit <= 0) {
+    return const [];
+  }
+
+  final tagCounts = <String, int>{};
+  for (final entry in entries.take(entrySampleLimit)) {
+    for (final tag in entry.tags) {
+      tagCounts.update(tag, (count) => count + 1, ifAbsent: () => 1);
+    }
+  }
+
+  final sortedTags = tagCounts.entries.toList()
+    ..sort((a, b) {
+      final countCompare = b.value.compareTo(a.value);
+      if (countCompare != 0) {
+        return countCompare;
+      }
+      return a.key.compareTo(b.key);
+    });
+
+  return sortedTags.take(displayLimit).map((entry) => entry.key).toList();
+}
+
 /// Vibe 选择结果
 class VibeSelectionResult {
   final List<VibeLibraryEntry> selectedEntries;
@@ -128,13 +159,13 @@ class _VibeSelectorDialogState extends ConsumerState<VibeSelectorDialog> {
     final recentEntries = [
       ...entries.where((entry) => entry.lastUsedAt != null),
     ]..sort((a, b) => b.lastUsedAt!.compareTo(a.lastUsedAt!));
-    final topTags = entries.allTags.toList()..sort();
+    final topTags = computeInitialTopTags(entries);
 
     setState(() {
       _allEntries = entries;
       _recentEntries = recentEntries.take(10).toList();
       _filteredEntries = _sortEntries(entries);
-      _topTags = topTags.take(6).toList();
+      _topTags = topTags;
     });
   }
 

@@ -85,7 +85,7 @@ class _VibeLibraryContentViewState
     return GridView.builder(
       key: const PageStorageKey<String>(_vibeLibraryGridKey),
       padding: const EdgeInsets.all(16),
-      cacheExtent: widget.itemWidth * 3,
+      cacheExtent: computeVibeGridCacheExtent(widget.itemWidth),
       addAutomaticKeepAlives: false,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: widget.columns,
@@ -144,11 +144,18 @@ class _VibeLibraryContentViewState
   }
 
   /// 显示 Vibe 详情
-  void _showVibeDetail(BuildContext context, VibeLibraryEntry entry) {
+  Future<void> _showVibeDetail(
+      BuildContext context, VibeLibraryEntry entry) async {
+    final storage = ref.read(vibeLibraryStorageServiceProvider);
+    final resolvedEntry = await resolveVibeDetailEntryForOpen(storage, entry);
+    if (!mounted || !context.mounted) {
+      return;
+    }
+
     VibeDetailViewer.show(
       context,
-      entry: entry,
-      heroTag: 'vibe_${entry.id}',
+      entry: resolvedEntry,
+      heroTag: 'vibe_${resolvedEntry.id}',
       callbacks: VibeDetailCallbacks(
         onSendToGeneration:
             (entry, strength, infoExtracted, isShiftPressed) async {
@@ -169,8 +176,8 @@ class _VibeLibraryContentViewState
         onRename: (entry, newName) {
           return _renameSingleEntry(context, entry, newName);
         },
-        onParamsChanged: (entry, strength, infoExtracted) {
-          _updateEntryParams(context, entry, strength, infoExtracted);
+        onSaveParams: (entry, strength, infoExtracted) async {
+          return _updateEntryParams(context, entry, strength, infoExtracted);
         },
       ),
     );
@@ -270,7 +277,8 @@ class _VibeLibraryContentViewState
               currentParams.vibeReferencesV4.length + adjustedVibes.length >
                   16) {
             if (context.mounted) {
-              AppToast.warning(context, context.l10n.vibeLibrary_maxVibesReached);
+              AppToast.warning(
+                  context, context.l10n.vibeLibrary_maxVibesReached);
             }
             return;
           }
@@ -381,7 +389,8 @@ class _VibeLibraryContentViewState
               currentParams.vibeReferencesV4.length + adjustedVibes.length >
                   16) {
             if (context.mounted) {
-              AppToast.warning(context, context.l10n.vibeLibrary_maxVibesReached);
+              AppToast.warning(
+                  context, context.l10n.vibeLibrary_maxVibesReached);
             }
             return;
           }
@@ -512,16 +521,36 @@ class _VibeLibraryContentViewState
   }
 
   /// 更新条目参数
-  void _updateEntryParams(
+  Future<VibeLibraryEntry?> _updateEntryParams(
     BuildContext context,
     VibeLibraryEntry entry,
     double strength,
     double infoExtracted,
-  ) {
-    final updatedEntry =
-        entry.updateStrength(strength).updateInfoExtracted(infoExtracted);
+  ) async {
+    final generationParams = ref.read(generationParamsNotifierProvider);
+    final preparedVibeData = await ref
+        .read(generationParamsNotifierProvider.notifier)
+        .prepareVibeForLibraryParamSave(
+          entry.toVibeReference(),
+          strength: strength,
+          infoExtracted: infoExtracted,
+          model: generationParams.model,
+        );
+    if (preparedVibeData == null) {
+      if (context.mounted) {
+        AppToast.error(context, '保存参数失败，Vibe 重新编码失败');
+      }
+      return null;
+    }
 
-    ref.read(vibeLibraryNotifierProvider.notifier).saveEntry(updatedEntry);
+    return ref
+        .read(vibeLibraryNotifierProvider.notifier)
+        .saveEntryParams(
+          entry.id,
+          strength: strength,
+          infoExtracted: infoExtracted,
+          persistedVibeData: preparedVibeData,
+        );
   }
 
   /// 获取空状态提示信息
@@ -544,6 +573,15 @@ class _VibeLibraryContentViewState
     // 默认无结果
     return EmptyStateInfo.defaultEmpty();
   }
+}
+
+double computeVibeGridCacheExtent(double itemWidth) => itemWidth * 1.5;
+
+Future<VibeLibraryEntry> resolveVibeDetailEntryForOpen(
+  VibeLibraryStorageService storage,
+  VibeLibraryEntry entry,
+) async {
+  return await storage.getEntry(entry.id) ?? entry;
 }
 
 /// 自定义上下文菜单路由

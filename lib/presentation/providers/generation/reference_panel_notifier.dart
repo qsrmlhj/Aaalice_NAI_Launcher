@@ -152,7 +152,6 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
               vibe.copyWith(
                 vibeEncoding: encoding,
                 sourceType: VibeSourceType.naiv4vibe,
-                rawImageData: null,
               ),
             );
           } else {
@@ -227,8 +226,8 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
 
       for (final vibe in vibes) {
         final vibeWithParams = vibe.copyWith(
-          strength: strength,
-          infoExtracted: infoExtracted,
+          strength: VibeReference.sanitizeStrength(strength),
+          infoExtracted: VibeReference.sanitizeInfoExtracted(infoExtracted),
         );
 
         final existingEntry = await findExistingEntry(vibe);
@@ -312,26 +311,27 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
   Future<bool> addRecentVibe(VibeLibraryEntry entry) async {
     final notifier = ref.read(generationParamsNotifierProvider.notifier);
     final vibes = ref.read(generationParamsNotifierProvider).vibeReferencesV4;
+    final actualEntry = await _storageService.getEntry(entry.id) ?? entry;
 
     if (vibes.length >= 16) {
       return false;
     }
 
-    if (entry.isBundle) {
+    if (actualEntry.isBundle) {
       final added = await _addBundleVibesToGeneration(
-        entry: entry,
+        entry: actualEntry,
         maxCount: 16,
       );
       if (added > 0) {
-        await _storageService.incrementUsedCount(entry.id);
+        await _storageService.incrementUsedCount(actualEntry.id);
         await _loadRecentEntries();
       }
       return added > 0;
     }
 
-    final vibe = entry.toVibeReference();
+    final vibe = actualEntry.toVibeReference();
     notifier.addVibeReferences([vibe]);
-    await _storageService.incrementUsedCount(entry.id);
+    await _storageService.incrementUsedCount(actualEntry.id);
     await _loadRecentEntries();
 
     return true;
@@ -341,25 +341,26 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
   Future<bool> addLibraryVibe(VibeLibraryEntry entry) async {
     final notifier = ref.read(generationParamsNotifierProvider.notifier);
     final vibes = ref.read(generationParamsNotifierProvider).vibeReferencesV4;
+    final actualEntry = await _storageService.getEntry(entry.id) ?? entry;
 
     if (vibes.length >= 16) {
       return false;
     }
 
-    if (entry.isBundle) {
+    if (actualEntry.isBundle) {
       final added = await _addBundleVibesToGeneration(
-        entry: entry,
+        entry: actualEntry,
         maxCount: 16,
       );
       if (added > 0) {
-        await _storageService.incrementUsedCount(entry.id);
+        await _storageService.incrementUsedCount(actualEntry.id);
       }
       return added > 0;
     }
 
-    final vibe = entry.toVibeReference();
+    final vibe = actualEntry.toVibeReference();
     notifier.addVibeReferences([vibe]);
-    await _storageService.incrementUsedCount(entry.id);
+    await _storageService.incrementUsedCount(actualEntry.id);
 
     return true;
   }
@@ -455,4 +456,3 @@ class SaveToLibraryResult {
 
   bool get hasSaved => savedCount > 0 || reusedCount > 0;
 }
-

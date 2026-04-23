@@ -120,6 +120,42 @@ class VibeLibraryStorageService {
     }
   }
 
+  /// 显式保存条目参数。
+  ///
+  /// 仅在用户明确点击“保存参数”时调用；若条目绑定了单个 Vibe 文件，
+  /// 会同步把文件里的 importInfo 一起更新，避免重新打开时被旧文件参数覆盖。
+  Future<VibeLibraryEntry?> saveEntryParams(
+    String id, {
+    required double strength,
+    required double infoExtracted,
+    VibeReference? persistedVibeData,
+  }) async {
+    await _ensureInit();
+    try {
+      final entry = _entriesBox!.get(id);
+      if (entry == null) return null;
+
+      final updatedEntry = persistedVibeData != null
+          ? entry.updateVibeData(persistedVibeData)
+          : entry.updateStrength(strength).updateInfoExtracted(infoExtracted);
+
+      final filePath = updatedEntry.filePath;
+      if (!updatedEntry.isBundle && filePath != null && filePath.isNotEmpty) {
+        await _fileStorage.overwriteVibeFile(
+          filePath,
+          updatedEntry.toVibeReference(),
+          displayName: updatedEntry.displayName,
+        );
+      }
+
+      await _entriesBox!.put(updatedEntry.id, updatedEntry);
+      return await getEntry(updatedEntry.id) ?? updatedEntry;
+    } catch (e, stackTrace) {
+      AppLogger.e('Failed to save entry params', e, stackTrace, _tag);
+      rethrow;
+    }
+  }
+
   /// 保存 Bundle 条目（新增或更新）
   Future<VibeLibraryEntry> saveBundleEntry(
     List<VibeReference> vibes, {
@@ -131,7 +167,8 @@ class VibeLibraryStorageService {
     try {
       if (vibes.isEmpty) throw ArgumentError('vibes cannot be empty');
 
-      final filePath = await _fileStorage.saveBundleToFile(vibes, bundleName: name);
+      final filePath =
+          await _fileStorage.saveBundleToFile(vibes, bundleName: name);
       final entry = VibeLibraryEntry.fromVibeReference(
         name: p.basenameWithoutExtension(filePath),
         vibeData: vibes.first,
@@ -177,10 +214,18 @@ class VibeLibraryStorageService {
         return null;
       }
 
-      // 保留原始缩略图（如果从文件加载的没有缩略图）
-      final effectiveThumbnail = vibeData.thumbnail ?? entry.vibeThumbnail ?? entry.thumbnail;
+      // 旧库里存在“文件只保存编码，原图仍只留在 Hive 条目里”的情况。
+      // 回读文件时要保住这份原图来源，否则条目会意外失去重新编码能力。
+      final effectiveThumbnail =
+          vibeData.thumbnail ?? entry.vibeThumbnail ?? entry.thumbnail;
+      final effectiveRawImageData = vibeData.rawImageData ?? entry.rawImageData;
       var mergedEntry = entry
-          .updateVibeData(vibeData.copyWith(thumbnail: effectiveThumbnail))
+          .updateVibeData(
+            vibeData.copyWith(
+              thumbnail: effectiveThumbnail,
+              rawImageData: effectiveRawImageData,
+            ),
+          )
           .copyWith(filePath: filePath);
       if (entry.isBundle) {
         final previews = await _fileStorage.extractPreviewsFromBundle(filePath);
@@ -200,7 +245,10 @@ class VibeLibraryStorageService {
   Future<List<VibeLibraryEntry>> getAllEntries() async {
     await _ensureInit();
     try {
-      return _entriesBox!.values.toList();
+      final entries = _entriesBox!.values.toList(growable: false);
+      return Future.wait(
+        entries.map(_resolveEntryDisplayParams),
+      );
     } catch (e, stackTrace) {
       AppLogger.e('Failed to get all entries: $e', 'VibeLibrary', stackTrace);
       return [];
@@ -211,19 +259,32 @@ class VibeLibraryStorageService {
   Future<List<VibeLibraryEntry>> getEntriesByCategory(
     String? categoryId,
   ) async {
-    await _ensureInit();
-    try {
-      return _entriesBox!.values
-          .where((entry) => entry.categoryId == categoryId)
-          .toList();
-    } catch (e, stackTrace) {
-      AppLogger.e(
-        'Failed to get entries by category: $e',
-        'VibeLibrary',
-        stackTrace,
-      );
-      return [];
+    final entries = await getAllEntries();
+    return entries.where((entry) => entry.categoryId == categoryId).toList();
+  }
+
+  Future<VibeLibraryEntry> _resolveEntryDisplayParams(
+    VibeLibraryEntry entry,
+  ) async {
+    final filePath = entry.filePath;
+    if (filePath == null || filePath.isEmpty) {
+      return entry;
     }
+
+    final storedParams = await _fileStorage.loadImportParams(filePath);
+    if (storedParams == null) {
+      return entry;
+    }
+
+    if (entry.strength == storedParams.strength &&
+        entry.infoExtracted == storedParams.infoExtracted) {
+      return entry;
+    }
+
+    return entry.copyWith(
+      strength: storedParams.strength,
+      infoExtracted: storedParams.infoExtracted,
+    );
   }
 
   /// 删除条目
@@ -240,7 +301,9 @@ class VibeLibraryStorageService {
       if (filePath != null && filePath.isNotEmpty) {
         final fileDeleted = await _fileStorage.deleteVibeFile(filePath);
         if (!fileDeleted) {
-          AppLogger.w('File delete failed but continuing to delete Hive entry: $id', _tag);
+          AppLogger.w(
+              'File delete failed but continuing to delete Hive entry: $id',
+              _tag);
           // 不返回 false，继续删除 Hive 条目以保持数据一致性
         }
       }
@@ -568,17 +631,20 @@ class VibeLibraryStorageService {
   }
 
   /// 重命名条目名称，并同步重命名文件后更新条目路径
-  Future<VibeEntryRenameResult> renameEntry(String entryId, String newName) async {
+  Future<VibeEntryRenameResult> renameEntry(
+      String entryId, String newName) async {
     await _ensureInit();
     try {
       final trimmedName = newName.trim();
       if (trimmedName.isEmpty) {
-        return const VibeEntryRenameResult.failure(VibeEntryRenameError.invalidName);
+        return const VibeEntryRenameResult.failure(
+            VibeEntryRenameError.invalidName);
       }
 
       final entry = _entriesBox!.get(entryId);
       if (entry == null) {
-        return const VibeEntryRenameResult.failure(VibeEntryRenameError.entryNotFound);
+        return const VibeEntryRenameResult.failure(
+            VibeEntryRenameError.entryNotFound);
       }
 
       final hasConflict = _entriesBox!.values.any((candidate) {
@@ -586,26 +652,32 @@ class VibeLibraryStorageService {
         return candidate.name.trim().toLowerCase() == trimmedName.toLowerCase();
       });
       if (hasConflict) {
-        return const VibeEntryRenameResult.failure(VibeEntryRenameError.nameConflict);
+        return const VibeEntryRenameResult.failure(
+            VibeEntryRenameError.nameConflict);
       }
 
       final filePath = entry.filePath;
       if (filePath == null || filePath.isEmpty) {
-        return const VibeEntryRenameResult.failure(VibeEntryRenameError.filePathMissing);
+        return const VibeEntryRenameResult.failure(
+            VibeEntryRenameError.filePathMissing);
       }
 
-      final renamedPath = await _fileStorage.renameVibeFile(filePath, trimmedName);
+      final renamedPath =
+          await _fileStorage.renameVibeFile(filePath, trimmedName);
       if (renamedPath == null) {
-        return const VibeEntryRenameResult.failure(VibeEntryRenameError.fileRenameFailed);
+        return const VibeEntryRenameResult.failure(
+            VibeEntryRenameError.fileRenameFailed);
       }
 
-      final updatedEntry = entry.copyWith(name: trimmedName, filePath: renamedPath);
+      final updatedEntry =
+          entry.copyWith(name: trimmedName, filePath: renamedPath);
       await _entriesBox!.put(entryId, updatedEntry);
       AppLogger.d('Entry renamed: $filePath -> $renamedPath', _tag);
       return VibeEntryRenameResult.success(updatedEntry);
     } catch (e, stackTrace) {
       AppLogger.e('Failed to rename entry', e, stackTrace, _tag);
-      return const VibeEntryRenameResult.failure(VibeEntryRenameError.fileRenameFailed);
+      return const VibeEntryRenameResult.failure(
+          VibeEntryRenameError.fileRenameFailed);
     }
   }
 
@@ -684,8 +756,10 @@ class VibeLibraryStorageService {
     final results = <VibeReference>[];
     for (var i = 0; i < encodings.length; i++) {
       final encoding = encodings[i];
-      final name = names != null && i < names.length ? names[i] : '${entry.name}#$i';
-      final thumbnail = previews != null && i < previews.length ? previews[i] : null;
+      final name =
+          names != null && i < names.length ? names[i] : '${entry.name}#$i';
+      final thumbnail =
+          previews != null && i < previews.length ? previews[i] : null;
 
       results.add(
         VibeReference(

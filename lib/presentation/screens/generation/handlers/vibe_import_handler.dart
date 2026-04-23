@@ -507,15 +507,6 @@ class VibeImportHandler {
     final storageService = ref.read(vibeLibraryStorageServiceProvider);
 
     try {
-      final libraryState = ref.read(vibeLibraryNotifierProvider);
-      if (libraryState.entries.isEmpty &&
-          !libraryState.isInitializing &&
-          !libraryState.isLoading) {
-        unawaited(
-          ref.read(vibeLibraryNotifierProvider.notifier).loadFromCache(),
-        );
-      }
-
       // 显示选择器对话框
       final result = await VibeSelectorDialog.show(
         context: context,
@@ -668,12 +659,30 @@ class VibeImportHandler {
       text: vibes.length == 1 ? firstVibe.displayName : '',
     );
 
+    final allEntries =
+        await ref.read(vibeLibraryStorageServiceProvider).getAllEntries();
+    final overwriteCandidate =
+        findOriginalLibraryEntryForOverwrite(vibes, allEntries);
+    final showInfoExtractedControl =
+        shouldShowInfoExtractedForLibrarySave(vibes);
+
+    if (!context.mounted) {
+      nameController.dispose();
+      return;
+    }
+
     final result = await showDialog<
-        (bool confirmed, double strength, double infoExtracted)?>(
+        (
+          bool confirmed,
+          double strength,
+          double infoExtracted,
+          bool overwriteOriginal
+        )?>(
       context: context,
       builder: (context) {
         var strengthValue = firstVibe.strength;
         var infoExtractedValue = firstVibe.infoExtracted;
+        var overwriteOriginal = false;
 
         return StatefulBuilder(
           builder: (context, setState) {
@@ -706,15 +715,30 @@ class VibeImportHandler {
                       onChanged: (value) =>
                           setState(() => strengthValue = value),
                     ),
-                    const SizedBox(height: 16),
-                    // Information Extracted 滑条
-                    _buildDialogSlider(
-                      context,
-                      label: l10n.vibe_saveToLibrary_infoExtracted,
-                      value: infoExtractedValue,
-                      onChanged: (value) =>
-                          setState(() => infoExtractedValue = value),
-                    ),
+                    if (showInfoExtractedControl) ...[
+                      const SizedBox(height: 16),
+                      _buildDialogSlider(
+                        context,
+                        label: l10n.vibe_saveToLibrary_infoExtracted,
+                        value: infoExtractedValue,
+                        onChanged: (value) =>
+                            setState(() => infoExtractedValue = value),
+                      ),
+                    ],
+                    if (overwriteCandidate != null) ...[
+                      const SizedBox(height: 16),
+                      CheckboxListTile(
+                        value: overwriteOriginal,
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('直接替换原 Vibe 参数'),
+                        subtitle: Text(
+                          '仅覆盖 ${overwriteCandidate.displayName} 的库内参数，默认不勾选',
+                        ),
+                        onChanged: (value) =>
+                            setState(() => overwriteOriginal = value ?? false),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -727,7 +751,12 @@ class VibeImportHandler {
                   onPressed: () {
                     if (nameController.text.trim().isNotEmpty) {
                       Navigator.of(context).pop(
-                        (true, strengthValue, infoExtractedValue),
+                        (
+                          true,
+                          strengthValue,
+                          infoExtractedValue,
+                          overwriteOriginal,
+                        ),
                       );
                     }
                   },
@@ -745,6 +774,7 @@ class VibeImportHandler {
       final name = nameController.text.trim();
       final strength = result.$2;
       final infoExtracted = result.$3;
+      final overwriteOriginal = result.$4;
 
       try {
         var savedCount = 0;
@@ -757,23 +787,36 @@ class VibeImportHandler {
             infoExtracted: infoExtracted,
           );
 
-          // 检查是否已存在相同名称的 vibe
-          final allEntries = await storageService.getAllEntries();
           final existingEntry = allEntries.firstWhereOrNull((entry) {
             return entry.name.toLowerCase() == name.toLowerCase();
           });
 
-          if (existingEntry != null) {
+          if (!overwriteOriginal && existingEntry != null) {
             // 已存在相同名称：删除旧条目
             await storageService.deleteEntry(existingEntry.id);
             reusedCount++;
           }
 
-          // 创建新条目
-          final entry = VibeLibraryEntry.fromVibeReference(
-            name: vibes.length == 1 ? name : '$name - ${vibe.displayName}',
-            vibeData: vibeWithParams,
-          );
+          final shouldOverwrite = overwriteOriginal &&
+              overwriteCandidate != null &&
+              vibes.length == 1;
+          final entry = shouldOverwrite
+              ? overwriteCandidate.update(
+                  vibeDisplayName: vibeWithParams.displayName,
+                  vibeEncoding: vibeWithParams.vibeEncoding,
+                  vibeThumbnail: vibeWithParams.thumbnail,
+                  rawImageData: vibeWithParams.rawImageData,
+                  strength: vibeWithParams.strength,
+                  infoExtracted: vibeWithParams.infoExtracted,
+                  sourceType: vibeWithParams.sourceType,
+                  thumbnail:
+                      overwriteCandidate.thumbnail ?? vibeWithParams.thumbnail,
+                )
+              : VibeLibraryEntry.fromVibeReference(
+                  name:
+                      vibes.length == 1 ? name : '$name - ${vibe.displayName}',
+                  vibeData: vibeWithParams,
+                );
           await storageService.saveEntry(entry);
           savedCount++;
         }
@@ -843,4 +886,29 @@ class VibeImportHandler {
       ],
     );
   }
+}
+
+VibeLibraryEntry? findOriginalLibraryEntryForOverwrite(
+  List<VibeReference> vibes,
+  List<VibeLibraryEntry> entries,
+) {
+  if (vibes.length != 1) {
+    return null;
+  }
+
+  final vibe = vibes.single;
+  return entries.firstWhereOrNull((entry) {
+    final sameDisplayName = entry.displayName == vibe.displayName;
+    final sameEncoding = entry.vibeEncoding == vibe.vibeEncoding;
+    final sameRawImage =
+        const ListEquality<int>().equals(entry.rawImageData, vibe.rawImageData);
+    return sameDisplayName && (sameEncoding || sameRawImage);
+  });
+}
+
+bool shouldShowInfoExtractedForLibrarySave(List<VibeReference> vibes) {
+  if (vibes.isEmpty) {
+    return false;
+  }
+  return vibes.every((vibe) => vibe.canReencodeFromRawSource);
 }
