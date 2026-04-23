@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:nai_launcher/core/utils/localization_extension.dart';
-import 'package:nai_launcher/data/models/image/image_params.dart';
 import 'package:nai_launcher/data/models/queue/replication_task.dart';
 import 'package:nai_launcher/presentation/providers/image_generation_provider.dart';
 import 'package:nai_launcher/presentation/providers/queue_execution_provider.dart';
@@ -32,7 +31,9 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
   @override
   Widget build(BuildContext context) {
     final generationState = ref.watch(imageGenerationNotifierProvider);
-    final params = ref.watch(generationParamsNotifierProvider);
+    final nSamples = ref.watch(
+      generationParamsNotifierProvider.select((params) => params.nSamples),
+    );
     final isGenerating = generationState.isGenerating;
 
     // 悬浮时显示取消，否则显示生成中
@@ -96,7 +97,6 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
               _buildGenerateButtonWithHover(
                 context: context,
                 ref: ref,
-                params: params,
                 isGenerating: isGenerating,
                 showCancel: showCancel,
                 generationState: generationState,
@@ -105,7 +105,7 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
               ),
               const SizedBox(width: 8),
               DraggableNumberInput(
-                value: params.nSamples,
+                value: nSamples,
                 min: 1,
                 prefix: '×',
                 onChanged: (value) {
@@ -140,7 +140,6 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
                   _buildGenerateButtonWithHover(
                     context: context,
                     ref: ref,
-                    params: params,
                     isGenerating: isGenerating,
                     showCancel: showCancel,
                     generationState: generationState,
@@ -149,7 +148,7 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
                   ),
                   const SizedBox(width: 12),
                   DraggableNumberInput(
-                    value: params.nSamples,
+                    value: nSamples,
                     min: 1,
                     prefix: '×',
                     onChanged: (value) {
@@ -175,7 +174,6 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
   Widget _buildGenerateButtonWithHover({
     required BuildContext context,
     required WidgetRef ref,
-    required ImageParams params,
     required bool isGenerating,
     required bool showCancel,
     required ImageGenerationState generationState,
@@ -210,7 +208,7 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
                 ? Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: AddToQueueIconButton(
-                      onPressed: () => _handleAddToQueue(context, ref, params),
+                      onPressed: () => _handleAddToQueue(context, ref),
                     ),
                   )
                 : const SizedBox.shrink(),
@@ -220,7 +218,7 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
             isGenerating: isGenerating,
             showCancel: showCancel,
             generationState: generationState,
-            onGenerate: () => _handleGenerate(context, ref, params, randomMode),
+            onGenerate: () => _handleGenerate(context, ref),
             onCancel: () =>
                 ref.read(imageGenerationNotifierProvider.notifier).cancel(),
           ),
@@ -232,8 +230,8 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
   void _handleAddToQueue(
     BuildContext context,
     WidgetRef ref,
-    ImageParams params,
   ) {
+    final params = ref.read(generationParamsNotifierProvider);
     if (params.prompt.isEmpty) {
       AppToast.warning(context, context.l10n.generation_pleaseInputPrompt);
       return;
@@ -251,9 +249,8 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
   void _handleGenerate(
     BuildContext context,
     WidgetRef ref,
-    ImageParams params,
-    bool randomMode,
   ) {
+    final params = ref.read(generationParamsNotifierProvider);
     if (params.prompt.isEmpty) {
       AppToast.warning(context, context.l10n.generation_pleaseInputPrompt);
       return;

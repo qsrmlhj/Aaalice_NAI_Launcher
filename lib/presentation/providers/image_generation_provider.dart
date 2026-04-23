@@ -60,6 +60,25 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
 
   bool _isCancelled = false;
 
+  Future<ImageParams> _prepareVibesForGeneration(ImageParams params) async {
+    if (params.vibeReferencesV4.isEmpty) {
+      return params;
+    }
+
+    final notifier = ref.read(generationParamsNotifierProvider.notifier);
+    final encodedVibes = await notifier.ensureVibeReferencesEncoded(
+      params.vibeReferencesV4,
+      model: params.model,
+      syncCurrentState: true,
+    );
+
+    if (identical(encodedVibes, params.vibeReferencesV4)) {
+      return params;
+    }
+
+    return params.copyWith(vibeReferencesV4: encodedVibes);
+  }
+
   Future<void> generate(ImageParams params) async {
     _isCancelled = false;
 
@@ -167,10 +186,11 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
       // 如果有角色且使用自定义位置，启用坐标模式
       useCoords: apiCharacters.isNotEmpty && !characterConfig.globalAiChoice,
     );
+    final preparedParams = await _prepareVibesForGeneration(baseParams);
 
     // 如果只生成 1 张，直接生成（不需要再随机，已经在开头随机过了）
     if (batchCount == 1 && batchSize == 1) {
-      await _generateSingle(baseParams, 1, 1);
+      await _generateSingle(preparedParams, 1, 1);
       // 注意：生成完成通知由 QueueExecutionNotifier 统一管理
       // 点数消耗由 AnlasBalanceWatcher 自动监听余额变化记录
       return;
@@ -184,8 +204,8 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
       currentImage: 1,
       totalImages: totalImages,
       currentImages: [],
-      batchWidth: baseParams.width,
-      batchHeight: baseParams.height,
+      batchWidth: preparedParams.width,
+      batchHeight: preparedParams.height,
     );
 
     final allImages = <GeneratedImage>[];
@@ -193,7 +213,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
     int generatedImages = 0;
 
     // 当前使用的参数（可能会被抽卡模式修改）
-    ImageParams currentParams = baseParams;
+    ImageParams currentParams = preparedParams;
 
     for (int batch = 0; batch < batchCount; batch++) {
       if (_isCancelled) break;
@@ -286,8 +306,8 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
           : GenerationStatus.completed,
       currentImages: List.from(allImages),
       displayImages: List.from(allImages), // 确保中央区域显示所有生成的图片
-      displayWidth: baseParams.width,
-      displayHeight: baseParams.height,
+      displayWidth: preparedParams.width,
+      displayHeight: preparedParams.height,
       progress: 1.0,
       currentImage: 0,
       totalImages: 0,
@@ -302,7 +322,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
 
     // 自动保存：如果启用且生成成功，保存所有图像
     if (!_isCancelled && allImages.isNotEmpty) {
-      await _autoSaveIfEnabled(allImages, baseParams);
+      await _autoSaveIfEnabled(allImages, preparedParams);
     }
   }
 
@@ -320,6 +340,8 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
   }
 
   /// 将外部结果登记到历史记录，并可选地直接保存到本地图库
+  ///
+  /// [addToDisplay] 为 true 时，将图像插入中央预览列表首位（如 ComfyUI 超分结果）。
   Future<void> registerExternalImage(
     Uint8List imageBytes, {
     required ImageParams params,
@@ -328,6 +350,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
     bool saveToLocal = false,
     String? saveDirectoryPath,
     bool syncToGalleryIndex = true,
+    bool addToDisplay = false,
   }) async {
     final resolvedSize = _resolveImageSize(
           imageBytes,
@@ -336,20 +359,40 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
         ) ??
         (params.width, params.height);
 
+    final existingMetadata =
+        await ImageMetadataService().getMetadataFromBytes(imageBytes);
+    final effectiveParams = params.copyWith(
+      width: resolvedSize.$1,
+      height: resolvedSize.$2,
+    );
+    final normalizedBytes = await ImageSaveUtils.rebuildImageBytesWithMetadata(
+      imageBytes: imageBytes,
+      params: effectiveParams,
+      actualSeed: existingMetadata?.seed,
+    );
+
     final generatedImage = GeneratedImage.create(
-      imageBytes,
+      normalizedBytes,
       width: resolvedSize.$1,
       height: resolvedSize.$2,
     );
 
     state = state.copyWith(
+      currentImages: addToDisplay
+          ? [generatedImage, ...state.currentImages]
+          : state.currentImages,
       history: [generatedImage, ...state.history].take(50).toList(),
+      displayImages: addToDisplay
+          ? [generatedImage, ...state.displayImages]
+          : state.displayImages,
+      displayWidth: addToDisplay ? resolvedSize.$1 : state.displayWidth,
+      displayHeight: addToDisplay ? resolvedSize.$2 : state.displayHeight,
     );
 
     if (saveToLocal) {
       await _saveImagesToGallery(
         [generatedImage],
-        params,
+        effectiveParams,
         saveImages: true,
         saveDirectoryPath: saveDirectoryPath,
         syncToGalleryIndex: syncToGalleryIndex,

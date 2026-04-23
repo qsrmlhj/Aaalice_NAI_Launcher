@@ -15,7 +15,6 @@ import '../../../../data/models/vibe/vibe_library_entry.dart';
 import '../../../../data/models/vibe/vibe_reference.dart';
 import '../../../../data/services/vibe_library_storage_service.dart';
 import '../../../providers/image_generation_provider.dart';
-import '../../../providers/vibe_library_provider.dart';
 import '../../../widgets/common/app_toast.dart';
 import '../../vibe_library/widgets/vibe_selector_dialog.dart';
 import 'empty_state_card.dart';
@@ -610,15 +609,6 @@ class DragTargetWrapper extends ConsumerWidget {
     final panelNotifier = ref.read(referencePanelNotifierProvider.notifier);
 
     try {
-      final libraryState = ref.read(vibeLibraryNotifierProvider);
-      if (libraryState.entries.isEmpty &&
-          !libraryState.isInitializing &&
-          !libraryState.isLoading) {
-        unawaited(
-          ref.read(vibeLibraryNotifierProvider.notifier).loadFromCache(),
-        );
-      }
-
       final result = await VibeSelectorDialog.show(
         context: context,
         initialSelectedIds: const {},

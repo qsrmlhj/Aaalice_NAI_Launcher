@@ -200,23 +200,27 @@ class StorageKeys {
       'enable_cooccurrence_recommendation';
 
   // Prompt Assistant
-  static const String promptAssistantConfigJson = 'prompt_assistant_config_json';
-  static const String promptAssistantApiKeyPrefix =
-      'prompt_assistant_api_key_';
+  static const String promptAssistantConfigJson =
+      'prompt_assistant_config_json';
+  static const String promptAssistantApiKeyPrefix = 'prompt_assistant_api_key_';
 
   // Danbooru 画师同步设置
   // 分类阈值配置（V2新增）
-  static const String danbooruCategoryThresholds = 'danbooru_category_thresholds';
-  
+  static const String danbooruCategoryThresholds =
+      'danbooru_category_thresholds';
+
   // 五个类别的独立热度阈值
   static const String danbooruGeneralThreshold = 'danbooru_general_threshold';
   static const String danbooruArtistThreshold = 'danbooru_artist_threshold';
-  static const String danbooruCharacterThreshold = 'danbooru_character_threshold';
-  static const String danbooruCopyrightThreshold = 'danbooru_copyright_threshold';
+  static const String danbooruCharacterThreshold =
+      'danbooru_character_threshold';
+  static const String danbooruCopyrightThreshold =
+      'danbooru_copyright_threshold';
   static const String danbooruMetaThreshold = 'danbooru_meta_threshold';
 
   // 共现数据刷新间隔
-  static const String cooccurrenceRefreshInterval = 'cooccurrence_refresh_interval';
+  static const String cooccurrenceRefreshInterval =
+      'cooccurrence_refresh_interval';
 
   // 数据源后台刷新相关
   static const String pendingDataSourceRefresh = 'pending_data_source_refresh';
@@ -232,4 +236,20 @@ class StorageKeys {
       'online_gallery_blacklist_last_sync_at';
   static const String onlineGalleryBlacklistLastSyncError =
       'online_gallery_blacklist_last_sync_error';
+
+  // ComfyUI 设置
+  static const String comfyuiEnabled = 'comfyui_enabled';
+  static const String comfyuiServerUrl = 'comfyui_server_url';
+  static const String comfyuiUpscaleModel = 'comfyui_upscale_model';
+  static const String comfyuiUpscaleScale = 'comfyui_upscale_scale';
+  static const String comfyuiUpscaleBackend = 'comfyui_upscale_backend';
+
+  // 工作流设置
+  static const String workflowEnhanceMagnitude = 'workflow_enhance_magnitude';
+  static const String workflowEnhanceShowIndividualSettings =
+      'workflow_enhance_show_individual_settings';
+  static const String workflowEnhanceUpscaleFactor =
+      'workflow_enhance_upscale_factor';
+  static const String workflowEnhanceStrength = 'workflow_enhance_strength';
+  static const String workflowEnhanceNoise = 'workflow_enhance_noise';
 }

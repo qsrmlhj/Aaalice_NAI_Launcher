@@ -89,13 +89,8 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // 页面重新可见时刷新（同步文件系统）- 在后台执行
-    _refreshIfNeededInBackground();
   }
 
-  DateTime? _lastRefreshTime;
-  DateTime? _lastSyncedDirectoryModifiedAt;
-  bool _isRefreshingInBackground = false;
   Set<String>? _reservedImportNames;
 
   void _beginImportSession() {
@@ -108,61 +103,6 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
 
   void _endImportSession() {
     _reservedImportNames = null;
-  }
-
-  /// 在后台刷新，不阻塞 UI
-  void _refreshIfNeededInBackground() {
-    if (_isImporting || _isPickingFile || _isDragging) {
-      return;
-    }
-
-    final now = DateTime.now();
-    // 如果超过30秒没有刷新，则执行刷新，避免页面内频繁重扫文件系统
-    if (_lastRefreshTime == null ||
-        now.difference(_lastRefreshTime!) > const Duration(seconds: 30)) {
-      _lastRefreshTime = now;
-
-      // 避免重复刷新
-      if (_isRefreshingInBackground) return;
-      _isRefreshingInBackground = true;
-
-      // 使用延迟避免在初始化时重复刷新，并在后台执行
-      Future.delayed(const Duration(milliseconds: 300), () async {
-        if (mounted) {
-          try {
-            if (await _shouldRunBackgroundVibeSync()) {
-              await ref
-                  .read(vibeLibraryNotifierProvider.notifier)
-                  .syncWithFileSystem();
-            }
-          } finally {
-            _isRefreshingInBackground = false;
-          }
-        } else {
-          _isRefreshingInBackground = false;
-        }
-      });
-    }
-  }
-
-  Future<bool> _shouldRunBackgroundVibeSync() async {
-    try {
-      final directoryPath = await VibeLibraryPathHelper.instance.getPath();
-      final stat = await Directory(directoryPath).stat();
-      final modifiedAt = stat.modified;
-      final lastModifiedAt = _lastSyncedDirectoryModifiedAt;
-
-      if (lastModifiedAt != null && !modifiedAt.isAfter(lastModifiedAt)) {
-        return false;
-      }
-
-      _lastSyncedDirectoryModifiedAt = modifiedAt;
-      return true;
-    } catch (e, stackTrace) {
-      AppLogger.w('检查 Vibe 目录修改时间失败，跳过后台同步: $e', 'VibeLibrary');
-      AppLogger.d(stackTrace.toString(), 'VibeLibrary');
-      return false;
-    }
   }
 
   @override

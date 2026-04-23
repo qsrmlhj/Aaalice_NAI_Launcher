@@ -4,8 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/utils/localization_extension.dart';
-import '../../../../data/models/image/image_params.dart';
 import '../../../../data/models/image/resolution_preset.dart';
+import '../../../providers/generation/generation_params_selectors.dart';
 import '../../../providers/image_generation_provider.dart';
 import '../../../widgets/common/themed_dropdown.dart';
 import '../../../widgets/common/themed_input.dart';
@@ -52,7 +52,9 @@ class _ParameterPanelState extends ConsumerState<ParameterPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final params = ref.watch(generationParamsNotifierProvider);
+    final params = ref.watch(
+      generationParamsNotifierProvider.select(selectParameterPanelViewData),
+    );
     final generationState = ref.watch(imageGenerationNotifierProvider);
     final theme = Theme.of(context);
     final isGenerating = generationState.isGenerating;
@@ -92,7 +94,7 @@ class _ParameterPanelState extends ConsumerState<ParameterPanel> {
                       }
                       ref
                           .read(imageGenerationNotifierProvider.notifier)
-                          .generate(params);
+                          .generate(ref.read(generationParamsNotifierProvider));
                     },
               icon: isGenerating
                   ? const Icon(Icons.stop)

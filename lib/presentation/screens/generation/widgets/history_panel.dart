@@ -14,6 +14,7 @@ import '../../../providers/tag_library_page_provider.dart';
 
 import '../../../../data/services/image_metadata_service.dart';
 import '../../../../data/repositories/gallery_folder_repository.dart';
+import '../../../providers/generation/generation_params_selectors.dart';
 import '../../../providers/image_generation_provider.dart';
 import '../../../providers/local_gallery_provider.dart';
 import '../../../services/image_workflow_launcher.dart';
@@ -239,13 +240,15 @@ class _HistoryPanelState extends ConsumerState<HistoryPanel> {
     ThemeData theme,
     WidgetRef ref,
   ) {
-    final params = ref.watch(generationParamsNotifierProvider);
+    final previewDimensions = ref.watch(
+      generationParamsNotifierProvider.select(selectPreviewDimensionsViewData),
+    );
     final history = state.history;
     // 使用批次分辨率（点击生成时捕获），fallback 到全局参数
     final batchAspectRatio =
         (state.batchWidth != null && state.batchHeight != null)
             ? state.batchWidth! / state.batchHeight!
-            : params.width / params.height;
+            : previewDimensions.width / previewDimensions.height;
 
     // 计算当前生成区块的项目数
     final currentGenerationCount = _getCurrentGenerationCount(state);
@@ -276,8 +279,8 @@ class _HistoryPanelState extends ConsumerState<HistoryPanel> {
                 context,
                 index,
                 state,
-                state.batchWidth ?? params.width,
-                state.batchHeight ?? params.height,
+                state.batchWidth ?? previewDimensions.width,
+                state.batchHeight ?? previewDimensions.height,
               ),
             ),
           );
@@ -301,6 +304,7 @@ class _HistoryPanelState extends ConsumerState<HistoryPanel> {
               sourceFilePath: historyImage.filePath,
               child: SelectableImageCard(
                 imageBytes: historyImage.bytes,
+                sourceFilePath: historyImage.filePath,
                 index: actualHistoryIndex,
                 showIndex: false,
                 isSelected: _selectedIds.contains(historyImage.id),
@@ -322,18 +326,26 @@ class _HistoryPanelState extends ConsumerState<HistoryPanel> {
                   historyImage.bytes,
                   mode: ImageEditorMode.edit,
                 ),
+                onInpaint: () => ImageWorkflowLauncher.openInpaint(
+                  context,
+                  ref,
+                  historyImage.bytes,
+                ),
                 onGenerateVariations: () =>
-                    ImageWorkflowLauncher.prepareVariations(
+                    ImageWorkflowLauncher.generateVariations(
                   context,
                   ref,
                   historyImage.bytes,
                 ),
                 onDirectorTools: () => ImageWorkflowLauncher.openDirectorTools(
+                  context,
                   ref,
                   historyImage.bytes,
                 ),
                 onEnhance: () =>
                     ImageWorkflowLauncher.openEnhance(ref, historyImage.bytes),
+                onUpscale: () =>
+                    ImageWorkflowLauncher.openUpscale(ref, historyImage.bytes),
                 onOpenInExplorer: () =>
                     _saveAndOpenInExplorer(context, historyImage.bytes),
                 onSaveToLibrary: (bytes, _) =>
@@ -381,6 +393,7 @@ class _HistoryPanelState extends ConsumerState<HistoryPanel> {
         sourceFilePath: image.filePath,
         child: SelectableImageCard(
           imageBytes: imageBytes,
+          sourceFilePath: image.filePath,
           index: index,
           showIndex: true,
           isSelected: _selectedIds.contains(image.id),
@@ -402,14 +415,17 @@ class _HistoryPanelState extends ConsumerState<HistoryPanel> {
             imageBytes,
             mode: ImageEditorMode.edit,
           ),
-          onGenerateVariations: () => ImageWorkflowLauncher.prepareVariations(
+          onInpaint: () =>
+              ImageWorkflowLauncher.openInpaint(context, ref, imageBytes),
+          onGenerateVariations: () => ImageWorkflowLauncher.generateVariations(
             context,
             ref,
             imageBytes,
           ),
           onDirectorTools: () =>
-              ImageWorkflowLauncher.openDirectorTools(ref, imageBytes),
+              ImageWorkflowLauncher.openDirectorTools(context, ref, imageBytes),
           onEnhance: () => ImageWorkflowLauncher.openEnhance(ref, imageBytes),
+          onUpscale: () => ImageWorkflowLauncher.openUpscale(ref, imageBytes),
           onOpenInExplorer: () => _saveAndOpenInExplorer(context, imageBytes),
           onSaveToLibrary: (bytes, _) =>
               _showSaveToLibraryDialog(context, bytes),

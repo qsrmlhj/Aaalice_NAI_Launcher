@@ -146,6 +146,7 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
   static const Set<String> _inpaintToolIds = {
     'brush',
     'eraser',
+    'fill',
     'rect_selection',
     'ellipse_selection',
     'lasso_selection',
