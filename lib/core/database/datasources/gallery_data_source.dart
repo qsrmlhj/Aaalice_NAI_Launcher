@@ -464,6 +464,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       LRUCache(maxSize: _maxQueryCacheSize);
   final Set<int> _favoriteCache = <int>{};
   bool _favoritesLoaded = false;
+  int _dataRevision = 0;
 
   // 慢查询日志
   final List<SlowQueryLog> _slowQueryLogs = [];
@@ -492,6 +493,17 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   void clearQueryCache() {
     _queryCache.clear();
     AppLogger.d('Gallery query cache cleared', 'GalleryDS');
+  }
+
+  /// 当前数据版本
+  ///
+  /// 每次会影响搜索/过滤结果的写操作完成后都会递增，
+  /// 供上层缓存感知底层数据已变化。
+  int get dataRevision => _dataRevision;
+
+  void _markDataChanged() {
+    _dataRevision++;
+    _queryCache.clear();
   }
 
   /// 获取缓存统计
@@ -915,7 +927,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     bool? isFavorite,
     DateTime? lastScannedAt,
   }) async {
-    return execute(
+    final id = await execute(
       'upsertImage',
       (db) async {
         final dateYmd = _formatDateYmd(modifiedAt);
@@ -973,6 +985,9 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       timeout: const Duration(seconds: 30),
       maxRetries: 3,
     );
+
+    _markDataChanged();
+    return id;
   }
 
   Future<int?> getImageIdByPath(String filePath) async {
@@ -1030,6 +1045,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         timeout: const Duration(seconds: 10),
         maxRetries: 3,
       );
+
+      _markDataChanged();
 
       AppLogger.d(
           'Updated file path for image $imageId: $newPath', 'GalleryDS');
@@ -1292,9 +1309,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           whereArgs: [filePath],
         );
 
-        // 清除相关查询缓存
-        clearQueryCache();
-
         AppLogger.d('Marked as deleted: $filePath', 'GalleryDS');
       } catch (e, stack) {
         AppLogger.e(
@@ -1306,6 +1320,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         rethrow;
       }
     });
+
+    _markDataChanged();
   }
 
   /// 优化的批量 upsert 方法
@@ -1317,7 +1333,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   }) async {
     if (records.isEmpty) return [];
 
-    return _trackQuery(
+    final result = await _trackQuery(
       'batchUpsertImages',
       () async {
         final results = <int>[];
@@ -1412,9 +1428,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           }
         }
 
-        // 清除查询缓存
-        clearQueryCache();
-
         AppLogger.i(
           'Batch upserted ${records.length} images in ${(records.length / batchSize).ceil()} batches',
           'GalleryDS',
@@ -1424,6 +1437,9 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       },
       details: '${records.length} records',
     );
+
+    _markDataChanged();
+    return result;
   }
 
   Future<void> batchMarkAsDeleted(List<String> filePaths) async {
@@ -1455,9 +1471,6 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           }
         }
 
-        // 清除查询缓存
-        clearQueryCache();
-
         AppLogger.d(
           'Batch marked as deleted: ${filePaths.length} files',
           'GalleryDS',
@@ -1467,6 +1480,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         rethrow;
       }
     });
+
+    _markDataChanged();
   }
 
   Future<int> countImages({bool includeDeleted = false}) async {
@@ -1591,6 +1606,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       );
 
       await _updateFtsIndex(imageId, fullPromptText);
+      _markDataChanged();
 
       // 【优化】高频操作不记录，避免日志刷屏
       // AppLogger.d('Upserted metadata for image: $imageId', 'GalleryDS');
@@ -1710,6 +1726,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         await Future.delayed(const Duration(milliseconds: 10));
       }
     }
+
+    _markDataChanged();
 
     AppLogger.i(
       'Batch upserted ${metadataList.length} metadata in ${(metadataList.length / batchSize).ceil()} batches',
@@ -1850,7 +1868,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   // ============================================================
 
   Future<bool> toggleFavorite(int imageId) async {
-    return await execute(
+    final isFavorite = await execute(
       'toggleFavorite',
       (db) async {
         final exists = await db.rawQuery(
@@ -1882,6 +1900,9 @@ class GalleryDataSource extends EnhancedBaseDataSource {
       timeout: const Duration(seconds: 10),
       maxRetries: 3,
     );
+
+    _markDataChanged();
+    return isFavorite;
   }
 
   Future<bool> isFavorite(int imageId) async {
@@ -2008,12 +2029,30 @@ class GalleryDataSource extends EnhancedBaseDataSource {
   // FTS5 全文搜索
   // ============================================================
 
+  List<String> _extractSearchTerms(String query) {
+    return query
+        .toLowerCase()
+        .trim()
+        .split(RegExp(r'[\s,]+'))
+        .map((term) => term.trim())
+        .where((term) => term.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  String _escapeLikePattern(String input) {
+    return input
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('_', r'\_');
+  }
+
   Future<List<int>> searchFullText(String query, {int limit = 100}) async {
-    if (query.trim().isEmpty) return [];
+    final searchTerms = _extractSearchTerms(query);
+    if (searchTerms.isEmpty) return [];
 
     // 缓存键
     final cacheKey = _QueryCacheKey('searchFullText', {
-      'query': query.toLowerCase().trim(),
+      'query': searchTerms.join(' '),
       'limit': limit,
     });
 
@@ -2029,11 +2068,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         try {
           String escapeFts5(String input) => input.replaceAll('"', '""');
 
-          final searchQuery = query
-              .split(RegExp(r'\s+'))
-              .where((s) => s.isNotEmpty)
-              .map((s) => '"${escapeFts5(s)}"*')
-              .join(' OR ');
+          final searchQuery =
+              searchTerms.map((term) => '"${escapeFts5(term)}"*').join(' OR ');
 
           final results = await execute(
             'searchFullText',
@@ -2063,6 +2099,68 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         } catch (e, stack) {
           AppLogger.e(
               'Failed to search full text: $query', e, stack, 'GalleryDS');
+          return [];
+        }
+      },
+      details: 'query="$query"',
+    );
+  }
+
+  Future<List<int>> searchByFileName(String query, {int limit = 100}) async {
+    final searchTerms = _extractSearchTerms(query);
+    if (searchTerms.isEmpty) return [];
+
+    final cacheKey = _QueryCacheKey('searchByFileName', {
+      'query': searchTerms.join(' '),
+      'limit': limit,
+    });
+
+    final cached = _queryCache.get(cacheKey);
+    if (cached != null) {
+      return cached.cast<int>();
+    }
+
+    return _trackQuery(
+      'searchByFileName',
+      () async {
+        try {
+          final likeConditions = searchTerms
+              .map((_) => r"LOWER(file_name) LIKE ? ESCAPE '\'")
+              .join(' OR ');
+          final likeArgs = searchTerms
+              .map((term) => '%${_escapeLikePattern(term)}%')
+              .toList(growable: false);
+
+          final results = await execute(
+            'searchByFileName',
+            (db) async {
+              final dbResults = await db.rawQuery(
+                '''
+                SELECT id FROM $_imagesTable
+                WHERE is_deleted = 0 AND ($likeConditions)
+                ORDER BY modified_at DESC
+                LIMIT ?
+                ''',
+                [...likeArgs, limit],
+              );
+
+              return dbResults
+                  .map((row) => (row['id'] as num).toInt())
+                  .toList();
+            },
+            timeout: const Duration(seconds: 10),
+            maxRetries: 3,
+          );
+
+          _queryCache.put(cacheKey, results);
+          return results;
+        } catch (e, stack) {
+          AppLogger.e(
+            'Failed to search by file name: $query',
+            e,
+            stack,
+            'GalleryDS',
+          );
           return [];
         }
       },
@@ -2110,16 +2208,19 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     return _trackQuery(
       'advancedSearch',
       () async {
-        return await execute('advancedSearch', (db) async {
-          // 1. 全文搜索（如果有文本查询）
-          List<int>? textSearchIds;
-          if (textQuery != null && textQuery.trim().isNotEmpty) {
-            textSearchIds = await searchFullText(textQuery, limit: limit * 2);
-            if (textSearchIds.isEmpty) {
-              return <int>[];
-            }
+        // 1. 预取搜索候选，兼容 prompt 与文件名两条搜索链路
+        List<int>? textSearchIds;
+        if (textQuery != null && textQuery.trim().isNotEmpty) {
+          final fullTextIds = await searchFullText(textQuery, limit: limit * 2);
+          final fileNameIds =
+              await searchByFileName(textQuery, limit: limit * 2);
+          textSearchIds = {...fullTextIds, ...fileNameIds}.toList();
+          if (textSearchIds.isEmpty) {
+            return <int>[];
           }
+        }
 
+        return await execute('advancedSearch', (db) async {
           // 2. 构建查询条件
           final conditions = <String>['i.is_deleted = 0'];
           final args = <dynamic>[];
@@ -2220,7 +2321,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     final normalizedTag = tagName.trim();
     final tagId = _generateTagId(normalizedTag);
 
-    return await execute('addTag', (db) async {
+    await execute('addTag', (db) async {
       await db.transaction((txn) async {
         await txn.insert(
           _tagsTable,
@@ -2255,6 +2356,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
 
       AppLogger.d('Added tag "$normalizedTag" to image $imageId', 'GalleryDS');
     });
+
+    _markDataChanged();
   }
 
   Future<void> removeTag(int imageId, String tagName) async {
@@ -2263,7 +2366,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     final normalizedTag = tagName.trim();
     final tagId = _generateTagId(normalizedTag);
 
-    return await execute('removeTag', (db) async {
+    await execute('removeTag', (db) async {
       await db.transaction((txn) async {
         await txn.delete(
           _imageTagsTable,
@@ -2288,6 +2391,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         'GalleryDS',
       );
     });
+
+    _markDataChanged();
   }
 
   Future<List<String>> getImageTags(int imageId) async {
@@ -2364,7 +2469,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     final normalizedTags =
         tags.map((t) => t.trim()).where((t) => t.isNotEmpty).toSet().toList();
 
-    return await execute('setImageTags', (db) async {
+    await execute('setImageTags', (db) async {
       await db.transaction((txn) async {
         final currentTagsResult = await txn.rawQuery(
           '''
@@ -2431,6 +2536,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
         'GalleryDS',
       );
     });
+
+    _markDataChanged();
   }
 
   String _generateTagId(String tagName) {

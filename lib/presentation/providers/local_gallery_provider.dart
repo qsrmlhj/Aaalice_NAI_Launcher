@@ -155,7 +155,8 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
         // 检查是否是错误状态的服务
         if (service is ErrorGalleryService) {
-          throw GalleryDatabaseException(message: '画廊服务初始化失败: ${service.error}');
+          throw GalleryDatabaseException(
+              message: '画廊服务初始化失败: ${service.error}');
         }
 
         // 使用 isInitialized 检查服务是否已初始化
@@ -172,7 +173,9 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
         attempts++;
       }
       if (_service == null) {
-        final typeInfo = lastService != null ? ' (last type: ${lastService.runtimeType})' : '';
+        final typeInfo = lastService != null
+            ? ' (last type: ${lastService.runtimeType})'
+            : '';
         throw GalleryDatabaseException(message: '画廊服务初始化超时$typeInfo');
       }
     }
@@ -194,12 +197,14 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       return;
     }
 
-    _setState(state.copyWith(
-      isLoading: true,
-      isIndexing: true,
-      isPageLoading: true,
-      error: null,
-    ),);
+    _setState(
+      state.copyWith(
+        isLoading: true,
+        isIndexing: true,
+        isPageLoading: true,
+        error: null,
+      ),
+    );
 
     try {
       final service = await getService();
@@ -212,7 +217,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       // 【调试日志】追踪计数问题
       AppLogger.d(
         'Gallery init: total=$totalCount, filtered=$filteredCount, '
-        'isInitialized=$isServiceInitialized, serviceType=${service.runtimeType}',
+            'isInitialized=$isServiceInitialized, serviceType=${service.runtimeType}',
         'LocalGalleryNotifier',
       );
 
@@ -221,46 +226,57 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
         firstTimeMessage = '检测到 $totalCount 张图片，首次索引可能需要几分钟，应用仍可正常使用';
       }
 
-      _setState(state.copyWith(
-        totalCount: totalCount,
-        filteredCount: service.filteredCount,
-        firstTimeIndexMessage: firstTimeMessage,
-        isLoading: false,
-        isInitialized: true,
-      ),);
+      _setState(
+        state.copyWith(
+          totalCount: totalCount,
+          filteredCount: service.filteredCount,
+          firstTimeIndexMessage: firstTimeMessage,
+          isLoading: false,
+          isInitialized: true,
+        ),
+      );
 
       // 加载首页
       await loadPage(0);
 
       // 后台扫描（通过服务层自动处理）
-      _setState(state.copyWith(
-        isIndexing: false,
-        isPageLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          isIndexing: false,
+          isPageLoading: false,
+        ),
+      );
     } on GalleryPermissionDeniedException catch (e) {
       AppLogger.e('Gallery permission denied', e, null, 'LocalGalleryNotifier');
-      _setState(state.copyWith(
-        error: '无法访问图片文件夹，请检查权限设置',
-        isLoading: false,
-        isIndexing: false,
-        isPageLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          error: '无法访问图片文件夹，请检查权限设置',
+          isLoading: false,
+          isIndexing: false,
+          isPageLoading: false,
+        ),
+      );
     } on GalleryScanException catch (e) {
       AppLogger.e('Gallery scan failed', e, null, 'LocalGalleryNotifier');
-      _setState(state.copyWith(
-        error: '扫描图片失败: ${e.message}',
-        isLoading: false,
-        isIndexing: false,
-        isPageLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          error: '扫描图片失败: ${e.message}',
+          isLoading: false,
+          isIndexing: false,
+          isPageLoading: false,
+        ),
+      );
     } catch (e) {
-      AppLogger.e('Failed to initialize gallery', e, null, 'LocalGalleryNotifier');
-      _setState(state.copyWith(
-        error: '初始化失败: $e',
-        isLoading: false,
-        isIndexing: false,
-        isPageLoading: false,
-      ),);
+      AppLogger.e(
+          'Failed to initialize gallery', e, null, 'LocalGalleryNotifier');
+      _setState(
+        state.copyWith(
+          error: '初始化失败: $e',
+          isLoading: false,
+          isIndexing: false,
+          isPageLoading: false,
+        ),
+      );
     }
   }
 
@@ -274,7 +290,8 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
   /// [showLoading] 是否显示加载状态
   Future<void> loadPage(int page, {bool showLoading = true}) async {
     if (!state.isInitialized) {
-      AppLogger.w('Gallery not initialized, cannot load page', 'LocalGalleryNotifier');
+      AppLogger.w(
+          'Gallery not initialized, cannot load page', 'LocalGalleryNotifier');
       return;
     }
 
@@ -292,34 +309,43 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
           : service.totalCount;
       final totalPages = (totalItems / state.pageSize).ceil();
 
-      _setState(state.copyWith(
-        currentImages: records,
-        currentPage: page,
-        totalPages: totalPages,
-        filteredCount: service.filteredCount,
-        totalCount: service.totalCount,
-        isLoading: false,
-        isPageLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          currentImages: records,
+          currentPage: page,
+          totalPages: totalPages,
+          filteredCount: service.filteredCount,
+          totalCount: service.totalCount,
+          isLoading: false,
+          isPageLoading: false,
+        ),
+      );
     } on GalleryNotInitializedException {
-      _setState(state.copyWith(
-        error: '画廊服务正在初始化，请稍后再试',
-        isLoading: false,
-        isPageLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          error: '画廊服务正在初始化，请稍后再试',
+          isLoading: false,
+          isPageLoading: false,
+        ),
+      );
     } on GalleryDatabaseException catch (e) {
-      AppLogger.e('Database error loading page', e, null, 'LocalGalleryNotifier');
-      _setState(state.copyWith(
-        error: '数据库错误: ${e.message}',
-        isLoading: false,
-        isPageLoading: false,
-      ),);
+      AppLogger.e(
+          'Database error loading page', e, null, 'LocalGalleryNotifier');
+      _setState(
+        state.copyWith(
+          error: '数据库错误: ${e.message}',
+          isLoading: false,
+          isPageLoading: false,
+        ),
+      );
     } catch (e) {
       AppLogger.e('Failed to load page $page', e, null, 'LocalGalleryNotifier');
-      _setState(state.copyWith(
-        isLoading: false,
-        isPageLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          isLoading: false,
+          isPageLoading: false,
+        ),
+      );
     }
   }
 
@@ -353,33 +379,39 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       // 重新应用当前过滤
       await service.applyFilter(state.filterCriteria);
 
-      _setState(state.copyWith(
-        totalCount: service.totalCount,
-        filteredCount: service.filteredCount,
-        isLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          totalCount: service.totalCount,
+          filteredCount: service.filteredCount,
+          isLoading: false,
+        ),
+      );
 
       // 刷新当前页
       await loadPage(state.currentPage, showLoading: false);
     } on GalleryScanException catch (e) {
-      _setState(state.copyWith(
-        error: '刷新失败: ${e.message}',
-        isLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          error: '刷新失败: ${e.message}',
+          isLoading: false,
+        ),
+      );
     } catch (e) {
-      _setState(state.copyWith(
-        error: '刷新失败: $e',
-        isLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          error: '刷新失败: $e',
+          isLoading: false,
+        ),
+      );
     }
   }
 
   /// 添加新生成的图像到画廊（即时显示优化）
   ///
   /// 用于图像生成后即时显示新保存的图像，不触发全量扫描
-  /// 
+  ///
   /// [filePaths] 新图像的文件路径列表
-  /// 
+  ///
   /// 返回成功添加的图像数量
   Future<int> addNewlySavedImages(List<String> filePaths) async {
     if (!state.isInitialized || filePaths.isEmpty) {
@@ -387,10 +419,10 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
     }
 
     var addedCount = 0;
-    
+
     try {
       final service = await getService();
-      
+
       for (final filePath in filePaths) {
         // 尝试即时添加新图像（不等待扫描）
         final success = await service.addNewImageImmediately(filePath);
@@ -398,25 +430,29 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
           addedCount++;
         }
       }
-      
+
       if (addedCount > 0) {
-        AppLogger.i('[AddNewImages] Added $addedCount new images immediately', 'LocalGalleryNotifier');
-        
+        AppLogger.i('[AddNewImages] Added $addedCount new images immediately',
+            'LocalGalleryNotifier');
+
         // 更新状态计数
-        _setState(state.copyWith(
-          totalCount: service.totalCount,
-          filteredCount: service.filteredCount,
-        ),);
-        
+        _setState(
+          state.copyWith(
+            totalCount: service.totalCount,
+            filteredCount: service.filteredCount,
+          ),
+        );
+
         // 如果在第一页，刷新显示以包含新图像
         if (state.currentPage == 0) {
           await loadPage(0, showLoading: false);
         }
       }
     } catch (e) {
-      AppLogger.e('[AddNewImages] Failed to add new images', e, null, 'LocalGalleryNotifier');
+      AppLogger.e('[AddNewImages] Failed to add new images', e, null,
+          'LocalGalleryNotifier');
     }
-    
+
     return addedCount;
   }
 
@@ -428,10 +464,12 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
     final criteria = state.filterCriteria;
     if (criteria.searchQuery == query) return;
 
-    _setState(state.copyWith(
-      filterCriteria: criteria.copyWith(searchQuery: query),
-      currentPage: 0,
-    ),);
+    _setState(
+      state.copyWith(
+        filterCriteria: criteria.copyWith(searchQuery: query),
+        currentPage: 0,
+      ),
+    );
 
     await _applyFilters();
   }
@@ -440,13 +478,15 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
     final criteria = state.filterCriteria;
     if (criteria.dateStart == start && criteria.dateEnd == end) return;
 
-    _setState(state.copyWith(
-      filterCriteria: criteria.copyWith(
-        dateStart: start,
-        dateEnd: end,
+    _setState(
+      state.copyWith(
+        filterCriteria: criteria.copyWith(
+          dateStart: start,
+          dateEnd: end,
+        ),
+        currentPage: 0,
       ),
-      currentPage: 0,
-    ),);
+    );
 
     await _applyFilters();
   }
@@ -455,10 +495,12 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
     final criteria = state.filterCriteria;
     if (criteria.showFavoritesOnly == value) return;
 
-    _setState(state.copyWith(
-      filterCriteria: criteria.copyWith(showFavoritesOnly: value),
-      currentPage: 0,
-    ),);
+    _setState(
+      state.copyWith(
+        filterCriteria: criteria.copyWith(showFavoritesOnly: value),
+        currentPage: 0,
+      ),
+    );
 
     await _applyFilters();
   }
@@ -466,10 +508,12 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
   Future<void> setPageSize(int size) async {
     if (state.pageSize == size) return;
 
-    _setState(state.copyWith(
-      pageSize: size,
-      currentPage: 0,
-    ),);
+    _setState(
+      state.copyWith(
+        pageSize: size,
+        currentPage: 0,
+      ),
+    );
 
     // 更新服务层的分页大小
     try {
@@ -481,61 +525,71 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
   }
 
   Future<void> setFilterModel(String? model) async {
-    _setState(state.copyWith(
-      filterCriteria: state.filterCriteria.copyWith(
-        filterModel: model,
-        clearFilterModel: model == null,
+    _setState(
+      state.copyWith(
+        filterCriteria: state.filterCriteria.copyWith(
+          filterModel: model,
+          clearFilterModel: model == null,
+        ),
+        currentPage: 0,
       ),
-      currentPage: 0,
-    ),);
+    );
     await _applyFilters();
   }
 
   Future<void> setFilterSampler(String? sampler) async {
-    _setState(state.copyWith(
-      filterCriteria: state.filterCriteria.copyWith(
-        filterSampler: sampler,
-        clearFilterSampler: sampler == null,
+    _setState(
+      state.copyWith(
+        filterCriteria: state.filterCriteria.copyWith(
+          filterSampler: sampler,
+          clearFilterSampler: sampler == null,
+        ),
+        currentPage: 0,
       ),
-      currentPage: 0,
-    ),);
+    );
     await _applyFilters();
   }
 
   Future<void> setFilterSteps(int? min, int? max) async {
-    _setState(state.copyWith(
-      filterCriteria: state.filterCriteria.copyWith(
-        filterMinSteps: min,
-        filterMaxSteps: max,
-        clearFilterMinSteps: min == null,
-        clearFilterMaxSteps: max == null,
+    _setState(
+      state.copyWith(
+        filterCriteria: state.filterCriteria.copyWith(
+          filterMinSteps: min,
+          filterMaxSteps: max,
+          clearFilterMinSteps: min == null,
+          clearFilterMaxSteps: max == null,
+        ),
+        currentPage: 0,
       ),
-      currentPage: 0,
-    ),);
+    );
     await _applyFilters();
   }
 
   Future<void> setFilterCfg(double? min, double? max) async {
-    _setState(state.copyWith(
-      filterCriteria: state.filterCriteria.copyWith(
-        filterMinCfg: min,
-        filterMaxCfg: max,
-        clearFilterMinCfg: min == null,
-        clearFilterMaxCfg: max == null,
+    _setState(
+      state.copyWith(
+        filterCriteria: state.filterCriteria.copyWith(
+          filterMinCfg: min,
+          filterMaxCfg: max,
+          clearFilterMinCfg: min == null,
+          clearFilterMaxCfg: max == null,
+        ),
+        currentPage: 0,
       ),
-      currentPage: 0,
-    ),);
+    );
     await _applyFilters();
   }
 
   Future<void> setFilterResolution(String? resolution) async {
-    _setState(state.copyWith(
-      filterCriteria: state.filterCriteria.copyWith(
-        filterResolution: resolution,
-        clearFilterResolution: resolution == null,
+    _setState(
+      state.copyWith(
+        filterCriteria: state.filterCriteria.copyWith(
+          filterResolution: resolution,
+          clearFilterResolution: resolution == null,
+        ),
+        currentPage: 0,
       ),
-      currentPage: 0,
-    ),);
+    );
     await _applyFilters();
   }
 
@@ -543,7 +597,8 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
   ///
   /// [categoryId] 分类ID（null表示全部）
   /// [categoryFolderPath] 分类的文件夹路径
-  Future<void> setSelectedCategory(String? categoryId, String? categoryFolderPath) async {
+  Future<void> setSelectedCategory(
+      String? categoryId, String? categoryFolderPath) async {
     final criteria = state.filterCriteria;
 
     // 检查是否有变化
@@ -552,15 +607,17 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       return;
     }
 
-    _setState(state.copyWith(
-      filterCriteria: criteria.copyWith(
-        categoryId: categoryId,
-        categoryFolderPath: categoryFolderPath,
-        clearCategoryId: categoryId == null,
-        clearCategoryFolderPath: categoryFolderPath == null,
+    _setState(
+      state.copyWith(
+        filterCriteria: criteria.copyWith(
+          categoryId: categoryId,
+          categoryFolderPath: categoryFolderPath,
+          clearCategoryId: categoryId == null,
+          clearCategoryFolderPath: categoryFolderPath == null,
+        ),
+        currentPage: 0,
       ),
-      currentPage: 0,
-    ),);
+    );
 
     await _applyFilters();
   }
@@ -593,21 +650,26 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
         page++;
       }
 
-      _setState(state.copyWith(
-        groupedImages: allRecords,
-        isGroupedLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          groupedImages: allRecords,
+          isGroupedLoading: false,
+        ),
+      );
     } catch (e) {
-      AppLogger.e('Failed to load grouped images', e, null, 'LocalGalleryNotifier');
+      AppLogger.e(
+          'Failed to load grouped images', e, null, 'LocalGalleryNotifier');
       _setState(state.copyWith(isGroupedLoading: false));
     }
   }
 
   Future<void> clearAllFilters() async {
-    _setState(state.copyWith(
-      filterCriteria: const FilterCriteria(),
-      currentPage: 0,
-    ),);
+    _setState(
+      state.copyWith(
+        filterCriteria: const FilterCriteria(),
+        currentPage: 0,
+      ),
+    );
     await _applyFilters();
   }
 
@@ -620,12 +682,12 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       // 【调试】记录过滤条件详情
       AppLogger.d(
         'Applying filters: hasFilters=${criteria.hasFilters}, search="${criteria.searchQuery}", '
-        'dateStart=${criteria.dateStart}, dateEnd=${criteria.dateEnd}, favOnly=${criteria.showFavoritesOnly}, '
-        'tags=${criteria.selectedTags}, model=${criteria.filterModel}, sampler=${criteria.filterSampler}, '
-        'steps=${criteria.filterMinSteps}-${criteria.filterMaxSteps}, cfg=${criteria.filterMinCfg}-${criteria.filterMaxCfg}, '
-        'res=${criteria.filterResolution}, width=${criteria.minWidth}-${criteria.maxWidth}, '
-        'height=${criteria.minHeight}-${criteria.maxHeight}, fileSize=${criteria.minFileSize}-${criteria.maxFileSize}, '
-        'metaStatuses=${criteria.metadataStatuses}',
+            'dateStart=${criteria.dateStart}, dateEnd=${criteria.dateEnd}, favOnly=${criteria.showFavoritesOnly}, '
+            'tags=${criteria.selectedTags}, model=${criteria.filterModel}, sampler=${criteria.filterSampler}, '
+            'steps=${criteria.filterMinSteps}-${criteria.filterMaxSteps}, cfg=${criteria.filterMinCfg}-${criteria.filterMaxCfg}, '
+            'res=${criteria.filterResolution}, width=${criteria.minWidth}-${criteria.maxWidth}, '
+            'height=${criteria.minHeight}-${criteria.maxHeight}, fileSize=${criteria.minFileSize}-${criteria.maxFileSize}, '
+            'metaStatuses=${criteria.metadataStatuses}',
         'LocalGalleryNotifier',
       );
 
@@ -634,14 +696,16 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       // 【调试】记录过滤结果
       AppLogger.d(
         'Filter result: total=${service.totalCount}, filtered=${service.filteredCount}, '
-        'currentFilter=${service.currentFilter.hasFilters}',
+            'currentFilter=${service.currentFilter.hasFilters}',
         'LocalGalleryNotifier',
       );
 
-      _setState(state.copyWith(
-        filteredCount: service.filteredCount,
-        totalCount: service.totalCount,
-      ),);
+      _setState(
+        state.copyWith(
+          filteredCount: service.filteredCount,
+          totalCount: service.totalCount,
+        ),
+      );
 
       if (state.isGroupedView) {
         await _loadGroupedImages();
@@ -650,9 +714,11 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       }
     } on GalleryFilterException catch (e) {
       AppLogger.e('Filter failed', e, null, 'LocalGalleryNotifier');
-      _setState(state.copyWith(
-        error: '过滤失败: ${e.message}',
-      ),);
+      _setState(
+        state.copyWith(
+          error: '过滤失败: ${e.message}',
+        ),
+      );
     } catch (e) {
       AppLogger.e('Failed to apply filters', e, null, 'LocalGalleryNotifier');
     }
@@ -683,9 +749,11 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       }
     } on GalleryDatabaseException catch (e) {
       AppLogger.e('Toggle favorite failed', e, null, 'LocalGalleryNotifier');
-      _setState(state.copyWith(
-        error: '切换收藏状态失败: ${e.message}',
-      ),);
+      _setState(
+        state.copyWith(
+          error: '切换收藏状态失败: ${e.message}',
+        ),
+      );
     } catch (e) {
       AppLogger.e('Toggle favorite failed', e, null, 'LocalGalleryNotifier');
     }
@@ -742,7 +810,7 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
   bool _shouldCancelRebuild = false;
 
   /// 重新扫描（全量扫描）
-  /// 
+  ///
   /// 使用统一的流式扫描逻辑：
   /// - 检查数据一致性（标记不存在的文件）
   /// - 查漏补缺（新文件、变更文件）
@@ -755,15 +823,18 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
     // 检查是否已有扫描在进行中
     if (ScanStateManager.instance.isScanning) {
-      AppLogger.w('[LocalGallery] Scan already in progress, skipping', 'LocalGalleryNotifier');
+      AppLogger.w('[LocalGallery] Scan already in progress, skipping',
+          'LocalGalleryNotifier');
       return;
     }
 
     _shouldCancelRebuild = false;
-    _setState(state.copyWith(
-      isRebuildingIndex: true,
-      isLoading: true,
-    ),);
+    _setState(
+      state.copyWith(
+        isRebuildingIndex: true,
+        isLoading: true,
+      ),
+    );
 
     try {
       final rootPath = await GalleryFolderRepository.instance.getRootPath();
@@ -782,10 +853,12 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
       await scanner.startScanning(
         dir,
+        retryMissingMetadata: true,
+        retryFailedMetadata: true,
         onFileProcessed: (result, stats) {
           AppLogger.d(
             '[FullScan] Processed: ${result.path.split(Platform.pathSeparator).last}, '
-            'stage: ${result.stage}',
+                'stage: ${result.stage}',
             'LocalGalleryNotifier',
           );
         },
@@ -793,10 +866,12 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
 
       if (_shouldCancelRebuild) {
         _shouldCancelRebuild = false;
-        _setState(state.copyWith(
-          isRebuildingIndex: false,
-          isLoading: false,
-        ),);
+        _setState(
+          state.copyWith(
+            isRebuildingIndex: false,
+            isLoading: false,
+          ),
+        );
         return;
       }
 
@@ -804,34 +879,42 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       final service = await getService();
 
       // 刷新状态
-      _setState(state.copyWith(
-        totalCount: service.totalCount,
-        filteredCount: service.filteredCount,
-        isRebuildingIndex: false,
-        isLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          totalCount: service.totalCount,
+          filteredCount: service.filteredCount,
+          isRebuildingIndex: false,
+          isLoading: false,
+        ),
+      );
 
       // 刷新当前页
       await loadPage(0, showLoading: false);
     } on GalleryCancelledException {
-      _setState(state.copyWith(
-        isRebuildingIndex: false,
-        isLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          isRebuildingIndex: false,
+          isLoading: false,
+        ),
+      );
     } on GalleryScanException catch (e) {
       AppLogger.e('Full scan failed', e, null, 'LocalGalleryNotifier');
-      _setState(state.copyWith(
-        error: '扫描失败: ${e.message}',
-        isRebuildingIndex: false,
-        isLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          error: '扫描失败: ${e.message}',
+          isRebuildingIndex: false,
+          isLoading: false,
+        ),
+      );
     } catch (e) {
       AppLogger.e('Full scan failed', e, null, 'LocalGalleryNotifier');
-      _setState(state.copyWith(
-        error: '扫描失败: $e',
-        isRebuildingIndex: false,
-        isLoading: false,
-      ),);
+      _setState(
+        state.copyWith(
+          error: '扫描失败: $e',
+          isRebuildingIndex: false,
+          isLoading: false,
+        ),
+      );
     }
   }
 
