@@ -160,6 +160,15 @@ class VibeLibraryEntry with _$VibeLibraryEntry {
     );
   }
 
+  /// 转换为仅保留展示所需字段的轻量条目
+  VibeLibraryEntry toDisplayEntry() {
+    return copyWith(
+      vibeEncoding: '',
+      rawImageData: null,
+      bundledVibeEncodings: null,
+    );
+  }
+
   /// 数据来源类型
   VibeSourceType get sourceType => VibeSourceType.values[sourceTypeIndex];
 
