@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../utils/app_logger.dart';
 import 'comfyui_models.dart';
+import 'comfyui_url_utils.dart';
 
 /// ComfyUI HTTP API 服务
 ///
@@ -20,12 +21,17 @@ class ComfyUIApiService {
   final Dio _dio;
   final String baseUrl;
 
-  ComfyUIApiService({required this.baseUrl})
-      : _dio = Dio(BaseOptions(
-          baseUrl: baseUrl,
-          connectTimeout: const Duration(seconds: 10),
-          receiveTimeout: const Duration(seconds: 300),
-        ));
+  ComfyUIApiService({required String baseUrl})
+      : this._(normalizeComfyUIBaseUrl(baseUrl));
+
+  ComfyUIApiService._(this.baseUrl)
+      : _dio = Dio(
+          BaseOptions(
+            baseUrl: baseUrl,
+            connectTimeout: const Duration(seconds: 10),
+            receiveTimeout: const Duration(seconds: 300),
+          ),
+        );
 
   /// 测试连接是否可用
   Future<bool> testConnection() async {

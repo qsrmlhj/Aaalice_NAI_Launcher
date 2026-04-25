@@ -2,13 +2,10 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/comfyui/comfyui.dart';
-import '../../../core/comfyui/comfyui_websocket_service.dart'
-    show ComfyUIImageFrame;
 import '../../../core/comfyui/object_info_parser.dart';
 import '../../../core/constants/storage_keys.dart';
 import '../../../core/utils/app_logger.dart';
@@ -19,14 +16,19 @@ part 'comfyui_provider.g.dart';
 
 @Riverpod(keepAlive: true)
 class ComfyUISettings extends _$ComfyUISettings {
-  static const String _tag = 'ComfyUI-Settings';
-
   @override
   ComfyUISettingsState build() {
     final box = Hive.box(StorageKeys.settingsBox);
+    final storedServerUrl = box.get(
+      StorageKeys.comfyuiServerUrl,
+      defaultValue: 'http://127.0.0.1:8188',
+    ) as String;
+    final serverUrl = normalizeComfyUIBaseUrl(storedServerUrl);
+    if (serverUrl != storedServerUrl) {
+      box.put(StorageKeys.comfyuiServerUrl, serverUrl);
+    }
     return ComfyUISettingsState(
-      serverUrl: box.get(StorageKeys.comfyuiServerUrl,
-          defaultValue: 'http://127.0.0.1:8188') as String,
+      serverUrl: serverUrl,
       enabled: box.get(StorageKeys.comfyuiEnabled, defaultValue: false) as bool,
     );
   }

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../utils/app_logger.dart';
 import 'comfyui_api_service.dart';
 import 'comfyui_models.dart';
+import 'comfyui_url_utils.dart';
 import 'comfyui_websocket_service.dart';
 
 /// ComfyUI 连接管理器
@@ -38,13 +39,14 @@ class ComfyUIConnectionManager {
 
   ComfyUIConnectionManager({
     String serverUrl = 'http://127.0.0.1:8188',
-  })  : _serverUrl = serverUrl,
+  })  : _serverUrl = normalizeComfyUIBaseUrl(serverUrl),
         clientId = const Uuid().v4();
 
   /// 更新服务器地址（需要重新连接）
   void updateServerUrl(String url) {
-    if (url == _serverUrl) return;
-    _serverUrl = url;
+    final normalizedUrl = normalizeComfyUIBaseUrl(url);
+    if (normalizedUrl == _serverUrl) return;
+    _serverUrl = normalizedUrl;
     if (_status == ComfyUIConnectionStatus.connected) {
       disconnect();
     }

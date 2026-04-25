@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nai_launcher/app.dart';
+import 'package:nai_launcher/core/comfyui/comfyui_url_utils.dart';
 
 /// 简单的 Widget 测试示例
 ///
@@ -41,8 +42,7 @@ void main() {
       expect(pressed, isTrue);
     });
 
-    testWidgets('AppBootstrapEffects 监听 provider 变化时不重建子树',
-        (tester) async {
+    testWidgets('AppBootstrapEffects 监听 provider 变化时不重建子树', (tester) async {
       final anlasWatcherProvider = StateProvider<int>((ref) => 0);
       final backgroundRefreshProvider = StateProvider<int>((ref) => 0);
       var buildCount = 0;
@@ -78,6 +78,38 @@ void main() {
       await tester.pump();
 
       expect(buildCount, 1);
+    });
+  });
+
+  group('ComfyUI URL helpers', () {
+    test('normalizes pasted server URLs without breaking scheme typing', () {
+      expect(
+        normalizeComfyUIBaseUrl('  http://127.0.0.1:8188/  '),
+        'http://127.0.0.1:8188',
+      );
+      expect(
+        normalizeComfyUIBaseUrl('https://example.test/comfyui///'),
+        'https://example.test/comfyui',
+      );
+      expect(normalizeComfyUIBaseUrl('http://'), 'http://');
+      expect(normalizeComfyUIBaseUrl('https://'), 'https://');
+    });
+
+    test('builds websocket URLs without double slashes', () {
+      final rootUri = buildComfyUIWebSocketUri(
+        baseUrl: 'http://127.0.0.1:8188/',
+        clientId: 'client-1',
+      );
+      final proxiedUri = buildComfyUIWebSocketUri(
+        baseUrl: 'https://example.test/comfyui/',
+        clientId: 'client-1',
+      );
+
+      expect(rootUri.toString(), 'ws://127.0.0.1:8188/ws?clientId=client-1');
+      expect(
+        proxiedUri.toString(),
+        'wss://example.test/comfyui/ws?clientId=client-1',
+      );
     });
   });
 }

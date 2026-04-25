@@ -6,6 +6,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../utils/app_logger.dart';
 import 'comfyui_models.dart';
+import 'comfyui_url_utils.dart';
 
 /// ComfyUI WebSocket 服务
 ///
@@ -34,19 +35,19 @@ class ComfyUIWebSocketService {
   String? _trackingPromptId;
 
   ComfyUIWebSocketService({
-    required this.baseUrl,
+    required String baseUrl,
     required this.clientId,
-  });
+  }) : baseUrl = normalizeComfyUIBaseUrl(baseUrl);
 
   /// 连接到 ComfyUI WebSocket
   Future<void> connect() async {
     if (_disposed) return;
     await disconnect();
 
-    final wsUrl = baseUrl
-        .replaceFirst('http://', 'ws://')
-        .replaceFirst('https://', 'wss://');
-    final uri = Uri.parse('$wsUrl/ws?clientId=$clientId');
+    final uri = buildComfyUIWebSocketUri(
+      baseUrl: baseUrl,
+      clientId: clientId,
+    );
 
     AppLogger.i('Connecting to $uri', _tag);
 

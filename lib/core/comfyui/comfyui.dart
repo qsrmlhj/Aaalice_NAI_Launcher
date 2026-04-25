@@ -9,7 +9,9 @@
 export 'comfyui_api_service.dart';
 export 'comfyui_connection_manager.dart';
 export 'comfyui_models.dart';
-export 'comfyui_websocket_service.dart' show ComfyUIWebSocketService, ComfyUIImageFrame;
+export 'comfyui_url_utils.dart';
+export 'comfyui_websocket_service.dart'
+    show ComfyUIWebSocketService, ComfyUIImageFrame;
 export 'workflow_analyzer.dart';
 export 'workflow_template.dart';
 export 'workflow_template_manager.dart';
