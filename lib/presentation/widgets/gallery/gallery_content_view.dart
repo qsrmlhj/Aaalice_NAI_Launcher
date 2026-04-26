@@ -88,6 +88,7 @@ class GenericGalleryContentView<T> extends ConsumerStatefulWidget {
   final GlobalKey<GroupedGridViewState>? groupedGridViewKey;
   final Gallery3DViewConfig<T>? view3DConfig;
   final void Function(LocalImageRecord record)? onSendToHome;
+  final void Function(LocalImageRecord record)? onSendToImg2Img;
   final String? emptyTitle;
   final String? emptySubtitle;
   final IconData? emptyIcon;
@@ -115,6 +116,7 @@ class GenericGalleryContentView<T> extends ConsumerStatefulWidget {
     this.groupedGridViewKey,
     this.view3DConfig,
     this.onSendToHome,
+    this.onSendToImg2Img,
     this.emptyTitle,
     this.emptySubtitle,
     this.emptyIcon,
@@ -299,6 +301,9 @@ class _GenericGalleryContentViewState<T>
             onSendToHome: widget.onSendToHome != null
                 ? () => widget.onSendToHome!(record)
                 : null,
+            onSendToImg2Img: widget.onSendToImg2Img != null
+                ? () => widget.onSendToImg2Img!(record)
+                : null,
           ),
         );
       },
@@ -427,6 +432,9 @@ class _GenericGalleryContentViewState<T>
       },
       onSendToHome: widget.onSendToHome != null
           ? (record, index) => widget.onSendToHome!(record)
+          : null,
+      onSendToImg2Img: widget.onSendToImg2Img != null
+          ? (record, index) => widget.onSendToImg2Img!(record)
           : null,
     );
   }
@@ -572,6 +580,8 @@ class LocalGalleryContentView extends ConsumerWidget {
             .toggleFavorite(record.path),
         onSendToHome:
             onReuseMetadata != null ? () => onReuseMetadata!(record) : null,
+        onSendToImg2Img:
+            onSendToImg2Img != null ? () => onSendToImg2Img!(record) : null,
       ),
       onSelectionToggle: (record) => ref
           .read(localGallerySelectionNotifierProvider.notifier)
@@ -596,6 +606,7 @@ class LocalGalleryContentView extends ConsumerWidget {
         showDetailViewer: showImageDetailViewer,
       ),
       onSendToHome: onReuseMetadata,
+      onSendToImg2Img: onSendToImg2Img,
     );
   }
 }

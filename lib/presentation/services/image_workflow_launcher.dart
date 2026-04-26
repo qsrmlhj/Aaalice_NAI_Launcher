@@ -18,6 +18,16 @@ import '../widgets/image_editor/image_editor_screen.dart';
 class ImageWorkflowLauncher {
   const ImageWorkflowLauncher._();
 
+  static void openImageToImage(
+    WidgetRef ref,
+    Uint8List imageBytes,
+  ) {
+    final workflowNotifier = ref.read(imageWorkflowControllerProvider.notifier);
+    workflowNotifier.replaceSourceImage(imageBytes);
+    workflowNotifier.enterBaseMode(clearMask: true);
+    workflowNotifier.setPanelExpanded(true);
+  }
+
   static Future<void> openEditor(
     BuildContext context,
     WidgetRef ref,

@@ -32,6 +32,7 @@ class LocalImageCard3D extends ConsumerStatefulWidget {
   final bool showFavoriteIndicator;
   final VoidCallback? onFavoriteToggle;
   final VoidCallback? onSendToHome;
+  final VoidCallback? onSendToImg2Img;
   final bool isVisible;
   final int priority;
 
@@ -52,6 +53,7 @@ class LocalImageCard3D extends ConsumerStatefulWidget {
     this.showFavoriteIndicator = true,
     this.onFavoriteToggle,
     this.onSendToHome,
+    this.onSendToImg2Img,
     this.isVisible = false,
     this.priority = 5,
     this.dragWrapper,
@@ -528,7 +530,8 @@ $image = [System.Drawing.Image]::FromFile("''';
         FloatingActionButtonData(
           icon: Icons.send,
           onTap: () => _showSendToHomeMenu(context),
-          visible: widget.onSendToHome != null,
+          visible:
+              widget.onSendToHome != null || widget.onSendToImg2Img != null,
         ),
       ],
     );
@@ -560,10 +563,12 @@ $image = [System.Drawing.Image]::FromFile("''';
                 widget.onSendToHome!();
               }
             : null,
-        onSendToImg2Img: () {
-          Navigator.of(dialogContext).pop();
-          AppToast.info(dialogContext, '图生图功能制作中');
-        },
+        onSendToImg2Img: widget.onSendToImg2Img != null
+            ? () {
+                Navigator.of(dialogContext).pop();
+                widget.onSendToImg2Img!();
+              }
+            : null,
         onUpscale: () {
           Navigator.of(dialogContext).pop();
           _openUpscale();
@@ -894,8 +899,8 @@ class _SendToHomeMenu extends StatelessWidget {
                     context,
                     icon: Icons.image,
                     label: '图生图',
-                    subtitle: '制作中',
-                    enabled: false,
+                    subtitle: onSendToImg2Img == null ? '不可用' : '载入源图',
+                    enabled: onSendToImg2Img != null,
                     onTap: onSendToImg2Img,
                   ),
                   Divider(height: 1, color: theme.colorScheme.outlineVariant),

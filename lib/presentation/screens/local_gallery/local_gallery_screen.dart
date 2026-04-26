@@ -32,7 +32,8 @@ import '../../providers/gallery_folder_provider.dart';
 import '../../providers/image_generation_provider.dart';
 import '../../providers/local_gallery_provider.dart';
 import '../../providers/gallery_scan_progress_provider.dart';
-import '../../providers/generation/image_workflow_controller.dart';
+import '../../router/app_router.dart';
+import '../../services/image_workflow_launcher.dart';
 import '../../providers/selection_mode_provider.dart';
 import '../../widgets/bulk_metadata_edit_dialog.dart';
 import '../../widgets/collection_select_dialog.dart';
@@ -1011,11 +1012,12 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
       }
 
       final imageBytes = await file.readAsBytes();
-      ref
-          .read(imageWorkflowControllerProvider.notifier)
-          .replaceSourceImage(imageBytes);
+      ImageWorkflowLauncher.openImageToImage(ref, imageBytes);
 
-      if (mounted) AppToast.success(context, '图片已发送到图生图，请切换到生成页面');
+      if (mounted) {
+        context.go(AppRoutes.home);
+        AppToast.success(context, '图片已发送到图生图');
+      }
     } catch (e) {
       if (mounted) AppToast.error(context, '发送失败: $e');
     }
