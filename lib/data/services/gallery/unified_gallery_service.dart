@@ -169,7 +169,7 @@ class LocalGalleryServiceImpl implements LocalGalleryService {
   bool get isInitialized => _isInitialized;
 
   List<File> get _effectiveFiles =>
-      _filteredFiles.isEmpty ? _allFiles : _filteredFiles;
+      _currentFilter.hasFilters ? _filteredFiles : _allFiles;
 
   @override
   int get filteredCount =>

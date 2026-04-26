@@ -1447,7 +1447,27 @@ class GalleryDataSource extends EnhancedBaseDataSource {
 
     await execute('batchMarkAsDeleted', (db) async {
       try {
+        final idsToInvalidate = <int>{};
+
         await db.transaction((txn) async {
+          for (final pathChunk in chunk(filePaths, 900)) {
+            final placeholders = List.filled(pathChunk.length, '?').join(',');
+            final rows = await txn.rawQuery(
+              '''
+              SELECT id FROM $_imagesTable
+              WHERE file_path IN ($placeholders)
+              ''',
+              pathChunk,
+            );
+
+            for (final row in rows) {
+              final id = (row['id'] as num?)?.toInt();
+              if (id != null) {
+                idsToInvalidate.add(id);
+              }
+            }
+          }
+
           final batch = txn.batch();
 
           for (final path in filePaths) {
@@ -1462,13 +1482,8 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           await batch.commit(noResult: true);
         });
 
-        // 更新缓存
-        final pathToIdMap = await getImageIdsByPaths(filePaths);
-        for (final entry in pathToIdMap.entries) {
-          final id = entry.value;
-          if (id != null) {
-            _imageCache.remove(id);
-          }
+        for (final id in idsToInvalidate) {
+          _imageCache.remove(id);
         }
 
         AppLogger.d(
@@ -1618,17 +1633,30 @@ class GalleryDataSource extends EnhancedBaseDataSource {
 
   String _buildFullPromptText(NaiImageMetadata metadata) {
     final buffer = StringBuffer();
-    buffer.write(metadata.prompt);
-    if (metadata.negativePrompt.isNotEmpty) {
-      buffer.write(' ');
-      buffer.write(metadata.negativePrompt);
-    }
-    for (final cp in metadata.characterPrompts) {
-      if (cp.isNotEmpty) {
+
+    void append(String? value) {
+      final text = value?.trim();
+      if (text == null || text.isEmpty) return;
+      if (buffer.isNotEmpty) {
         buffer.write(' ');
-        buffer.write(cp);
       }
+      buffer.write(text);
     }
+
+    append(metadata.prompt);
+    append(metadata.negativePrompt);
+    for (final cp in metadata.characterPrompts) {
+      append(cp);
+    }
+    for (final cp in metadata.characterNegativePrompts) {
+      append(cp);
+    }
+    append(metadata.model);
+    append(metadata.sampler);
+    append(metadata.software);
+    append(metadata.source);
+    append(metadata.version);
+
     return buffer.toString();
   }
 
@@ -2168,6 +2196,95 @@ class GalleryDataSource extends EnhancedBaseDataSource {
     );
   }
 
+  Future<List<int>> searchByMetadataText(
+    String query, {
+    int limit = 100,
+  }) async {
+    final searchTerms = _extractSearchTerms(query);
+    if (searchTerms.isEmpty) return [];
+
+    final cacheKey = _QueryCacheKey('searchByMetadataText', {
+      'query': searchTerms.join(' '),
+      'limit': limit,
+    });
+
+    final cached = _queryCache.get(cacheKey);
+    if (cached != null) {
+      return cached.cast<int>();
+    }
+
+    return _trackQuery(
+      'searchByMetadataText',
+      () async {
+        try {
+          const searchableColumns = [
+            'm.full_prompt_text',
+            'm.prompt',
+            'm.negative_prompt',
+            'm.model',
+            'm.sampler',
+            'm.software',
+            'm.source',
+            'm.version',
+          ];
+
+          final termConditions = <String>[];
+          final likeArgs = <String>[];
+
+          for (final term in searchTerms) {
+            termConditions.add(
+              searchableColumns
+                  .map((column) => "LOWER($column) LIKE ? ESCAPE '\\'")
+                  .join(' OR '),
+            );
+
+            final pattern = '%${_escapeLikePattern(term)}%';
+            for (var i = 0; i < searchableColumns.length; i++) {
+              likeArgs.add(pattern);
+            }
+          }
+
+          final whereClause =
+              termConditions.map((condition) => '($condition)').join(' OR ');
+
+          final results = await execute(
+            'searchByMetadataText',
+            (db) async {
+              final dbResults = await db.rawQuery(
+                '''
+                SELECT m.image_id FROM $_metadataTable m
+                INNER JOIN $_imagesTable i ON i.id = m.image_id
+                WHERE i.is_deleted = 0 AND ($whereClause)
+                ORDER BY i.modified_at DESC
+                LIMIT ?
+                ''',
+                [...likeArgs, limit],
+              );
+
+              return dbResults
+                  .map((row) => (row['image_id'] as num).toInt())
+                  .toList();
+            },
+            timeout: const Duration(seconds: 10),
+            maxRetries: 3,
+          );
+
+          _queryCache.put(cacheKey, results);
+          return results;
+        } catch (e, stack) {
+          AppLogger.e(
+            'Failed to search by metadata text: $query',
+            e,
+            stack,
+            'GalleryDS',
+          );
+          return [];
+        }
+      },
+      details: 'query="$query"',
+    );
+  }
+
   /// 高级搜索 - 支持多条件组合查询
   Future<List<int>> advancedSearch({
     String? textQuery,
@@ -2214,7 +2331,10 @@ class GalleryDataSource extends EnhancedBaseDataSource {
           final fullTextIds = await searchFullText(textQuery, limit: limit * 2);
           final fileNameIds =
               await searchByFileName(textQuery, limit: limit * 2);
-          textSearchIds = {...fullTextIds, ...fileNameIds}.toList();
+          final metadataTextIds =
+              await searchByMetadataText(textQuery, limit: limit * 2);
+          textSearchIds =
+              {...fullTextIds, ...fileNameIds, ...metadataTextIds}.toList();
           if (textSearchIds.isEmpty) {
             return <int>[];
           }
@@ -2417,7 +2537,7 @@ class GalleryDataSource extends EnhancedBaseDataSource {
 
     try {
       final tagsMap = <int, List<String>>{
-        for (final id in imageIds) id: const <String>[],
+        for (final id in imageIds) id: <String>[],
       };
 
       const batchSize = 900;
