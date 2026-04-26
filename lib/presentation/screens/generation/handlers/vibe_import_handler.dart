@@ -9,7 +9,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 // Import for locale-aware string comparison
 
-import '../../../../core/extensions/vibe_library_extensions.dart';
 import '../../../../core/utils/app_logger.dart';
 import '../../../../core/utils/localization_extension.dart';
 import '../../../../core/utils/vibe_file_parser.dart';
@@ -496,8 +495,7 @@ class VibeImportHandler {
     VibeLibraryStorageService storageService,
     VibeReference vibe,
   ) async {
-    final allEntries = await storageService.getAllEntries();
-    return allEntries.findMatchingEntry(vibe);
+    return storageService.findMatchingEntry(vibe);
   }
 
   /// 从库导入 Vibes
@@ -544,7 +542,7 @@ class VibeImportHandler {
               .toSet();
           if (!existingNames.contains(entry.displayName)) {
             final vibe = entry.toVibeReference();
-            notifier.addVibeReferences([vibe]);
+            notifier.addVibeReferences([vibe], recordUsage: false);
             totalAdded++;
           }
         }
@@ -612,7 +610,7 @@ class VibeImportHandler {
               ),
             )
             .toList();
-        notifier.addVibeReferences(vibesWithSource);
+        notifier.addVibeReferences(vibesWithSource, recordUsage: false);
 
         if (showToast && context.mounted) {
           AppToast.success(
@@ -659,10 +657,9 @@ class VibeImportHandler {
       text: vibes.length == 1 ? firstVibe.displayName : '',
     );
 
-    final allEntries =
-        await ref.read(vibeLibraryStorageServiceProvider).getAllEntries();
-    final overwriteCandidate =
-        findOriginalLibraryEntryForOverwrite(vibes, allEntries);
+    final overwriteCandidate = await ref
+        .read(vibeLibraryStorageServiceProvider)
+        .findOverwriteCandidate(vibes);
     final showInfoExtractedControl =
         shouldShowInfoExtractedForLibrarySave(vibes);
 
@@ -787,9 +784,7 @@ class VibeImportHandler {
             infoExtracted: infoExtracted,
           );
 
-          final existingEntry = allEntries.firstWhereOrNull((entry) {
-            return entry.name.toLowerCase() == name.toLowerCase();
-          });
+          final existingEntry = await storageService.findEntryByName(name);
 
           if (!overwriteOriginal && existingEntry != null) {
             // 已存在相同名称：删除旧条目

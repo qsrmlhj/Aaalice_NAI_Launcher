@@ -644,7 +644,7 @@ class DragTargetWrapper extends ConsumerWidget {
               .toSet();
           if (!existingNames.contains(entry.displayName)) {
             final vibe = entry.toVibeReference();
-            notifier.addVibeReferences([vibe]);
+            notifier.addVibeReferences([vibe], recordUsage: false);
             totalAdded++;
           }
         }

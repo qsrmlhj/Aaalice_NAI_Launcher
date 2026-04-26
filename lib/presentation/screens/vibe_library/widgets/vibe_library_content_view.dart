@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -135,7 +136,7 @@ class _VibeLibraryContentViewState
                     physicalKeys.contains(PhysicalKeyboardKey.shiftRight);
             await _sendEntryToGeneration(context, entry, isShiftPressed);
           },
-          onExport: () => _exportSingleEntry(context, entry),
+          onExport: () => unawaited(_exportSingleEntry(context, entry)),
           onEdit: () => _showVibeDetail(context, entry),
           onDelete: () => _deleteSingleEntry(context, entry),
         );
@@ -145,7 +146,9 @@ class _VibeLibraryContentViewState
 
   /// 显示 Vibe 详情
   Future<void> _showVibeDetail(
-      BuildContext context, VibeLibraryEntry entry) async {
+    BuildContext context,
+    VibeLibraryEntry entry,
+  ) async {
     final storage = ref.read(vibeLibraryStorageServiceProvider);
     final resolvedEntry = await resolveVibeDetailEntryForOpen(storage, entry);
     if (!mounted || !context.mounted) {
@@ -168,7 +171,7 @@ class _VibeLibraryContentViewState
           );
         },
         onExport: (entry) {
-          _exportSingleEntry(context, entry);
+          unawaited(_exportSingleEntry(context, entry));
         },
         onDelete: (entry) {
           _deleteSingleEntry(context, entry);
@@ -201,7 +204,7 @@ class _VibeLibraryContentViewState
         id: 'export',
         label: l10n.vibeLibrary_export,
         icon: Icons.download,
-        onTap: () => _exportSingleEntry(context, entry),
+        onTap: () => unawaited(_exportSingleEntry(context, entry)),
       ),
       ProMenuItem(
         id: 'edit',
@@ -248,18 +251,20 @@ class _VibeLibraryContentViewState
     VibeLibraryEntry entry, [
     bool isShiftPressed = false,
   ]) async {
+    final storage = ref.read(vibeLibraryStorageServiceProvider);
+    final actualEntry = await storage.getEntry(entry.id) ?? entry;
     final paramsNotifier = ref.read(generationParamsNotifierProvider.notifier);
     final currentParams = ref.read(generationParamsNotifierProvider);
 
     // 处理 Bundle 条目：从文件读取所有 vibes
-    if (entry.isBundle &&
-        entry.filePath != null &&
-        entry.filePath!.isNotEmpty) {
-      final file = File(entry.filePath!);
+    if (actualEntry.isBundle &&
+        actualEntry.filePath != null &&
+        actualEntry.filePath!.isNotEmpty) {
+      final file = File(actualEntry.filePath!);
       if (await file.exists()) {
         try {
           final bytes = await file.readAsBytes();
-          final fileName = p.basename(entry.filePath!);
+          final fileName = p.basename(actualEntry.filePath!);
           final vibes = await VibeFileParser.fromBundle(fileName, bytes);
 
           // 应用条目的 strength 和 infoExtracted 到所有 vibes
@@ -278,7 +283,9 @@ class _VibeLibraryContentViewState
                   16) {
             if (context.mounted) {
               AppToast.warning(
-                  context, context.l10n.vibeLibrary_maxVibesReached);
+                context,
+                context.l10n.vibeLibrary_maxVibesReached,
+              );
             }
             return;
           }
@@ -288,21 +295,23 @@ class _VibeLibraryContentViewState
             paramsNotifier.setVibeReferences(adjustedVibes);
           } else {
             // 普通点击：追加 vibes
-            paramsNotifier.addVibeReferences(adjustedVibes);
+            paramsNotifier.addVibeReferences(adjustedVibes, recordUsage: false);
           }
 
-          ref.read(vibeLibraryNotifierProvider.notifier).recordUsage(entry.id);
+          ref
+              .read(vibeLibraryNotifierProvider.notifier)
+              .recordUsage(actualEntry.id);
           if (context.mounted) {
             final message = isShiftPressed
-                ? '已替换为 ${adjustedVibes.length} 个 Vibe: ${entry.displayName}'
-                : '已发送 ${adjustedVibes.length} 个 Vibe 到生成页面: ${entry.displayName}';
+                ? '已替换为 ${adjustedVibes.length} 个 Vibe: ${actualEntry.displayName}'
+                : '已发送 ${adjustedVibes.length} 个 Vibe 到生成页面: ${actualEntry.displayName}';
             AppToast.success(context, message);
             context.go(AppRoutes.home);
           }
           return;
         } catch (e, stackTrace) {
           AppLogger.e(
-            '读取 Bundle 文件失败: ${entry.filePath}',
+            '读取 Bundle 文件失败: ${actualEntry.filePath}',
             e,
             stackTrace,
             'VibeLibrary',
@@ -327,20 +336,20 @@ class _VibeLibraryContentViewState
     }
 
     // 普通条目或 Bundle 文件不存在时，使用单个 vibe
-    final vibeReference = entry.toVibeReference();
+    final vibeReference = actualEntry.toVibeReference();
     if (isShiftPressed) {
       // Shift+点击：替换现有 vibes
       paramsNotifier.setVibeReferences([vibeReference]);
     } else {
       // 普通点击：追加 vibes
-      paramsNotifier.addVibeReferences([vibeReference]);
+      paramsNotifier.addVibeReferences([vibeReference], recordUsage: false);
     }
 
-    ref.read(vibeLibraryNotifierProvider.notifier).recordUsage(entry.id);
+    ref.read(vibeLibraryNotifierProvider.notifier).recordUsage(actualEntry.id);
     if (context.mounted) {
       final message = isShiftPressed
-          ? '已替换为: ${entry.displayName}'
-          : '已发送到生成页面: ${entry.displayName}';
+          ? '已替换为: ${actualEntry.displayName}'
+          : '已发送到生成页面: ${actualEntry.displayName}';
       AppToast.success(context, message);
       context.go(AppRoutes.home);
     }
@@ -390,7 +399,9 @@ class _VibeLibraryContentViewState
                   16) {
             if (context.mounted) {
               AppToast.warning(
-                  context, context.l10n.vibeLibrary_maxVibesReached);
+                context,
+                context.l10n.vibeLibrary_maxVibesReached,
+              );
             }
             return;
           }
@@ -398,7 +409,7 @@ class _VibeLibraryContentViewState
           if (isShiftPressed) {
             paramsNotifier.setVibeReferences(adjustedVibes);
           } else {
-            paramsNotifier.addVibeReferences(adjustedVibes);
+            paramsNotifier.addVibeReferences(adjustedVibes, recordUsage: false);
           }
           ref.read(vibeLibraryNotifierProvider.notifier).recordUsage(entry.id);
           if (context.mounted) {
@@ -436,7 +447,7 @@ class _VibeLibraryContentViewState
     if (isShiftPressed) {
       paramsNotifier.setVibeReferences([vibeRef]);
     } else {
-      paramsNotifier.addVibeReferences([vibeRef]);
+      paramsNotifier.addVibeReferences([vibeRef], recordUsage: false);
     }
     ref.read(vibeLibraryNotifierProvider.notifier).recordUsage(entry.id);
     if (context.mounted) {
@@ -449,13 +460,21 @@ class _VibeLibraryContentViewState
   }
 
   /// 导出单个条目
-  void _exportSingleEntry(BuildContext context, VibeLibraryEntry entry) {
+  Future<void> _exportSingleEntry(
+    BuildContext context,
+    VibeLibraryEntry entry,
+  ) async {
+    final storage = ref.read(vibeLibraryStorageServiceProvider);
+    final actualEntry = await storage.getEntry(entry.id) ?? entry;
+    if (!mounted || !context.mounted) {
+      return;
+    }
     final categories = ref.read(vibeLibraryCategoryNotifierProvider).categories;
 
     showDialog<void>(
       context: context,
       builder: (context) => VibeExportDialog(
-        entries: [entry],
+        entries: [actualEntry],
         categories: categories,
       ),
     );
@@ -543,9 +562,7 @@ class _VibeLibraryContentViewState
       return null;
     }
 
-    return ref
-        .read(vibeLibraryNotifierProvider.notifier)
-        .saveEntryParams(
+    return ref.read(vibeLibraryNotifierProvider.notifier).saveEntryParams(
           entry.id,
           strength: strength,
           infoExtracted: infoExtracted,

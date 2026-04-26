@@ -353,8 +353,9 @@ class _VibeSelectorDialogState extends ConsumerState<VibeSelectorDialog> {
         final entry = _findEntryById(id);
         if (entry == null) continue;
 
+        final actualEntry = await storageService.getEntry(id) ?? entry;
         await storageService.incrementUsedCount(id);
-        selectedEntries.add(entry);
+        selectedEntries.add(actualEntry);
       }
     }
 

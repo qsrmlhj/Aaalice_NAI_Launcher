@@ -143,7 +143,7 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
 
   /// 重新加载数据
   Future<void> reload({
-    bool syncFileSystem = true,
+    bool syncFileSystem = false,
     bool showLoading = false,
   }) async {
     // 先同步文件系统，确保文件增删反映在 Hive 中
@@ -179,7 +179,11 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
       return result;
     } catch (e, stackTrace) {
       AppLogger.e(
-          'Failed to sync with file system', e, stackTrace, 'VibeLibrary');
+        'Failed to sync with file system',
+        e,
+        stackTrace,
+        'VibeLibrary',
+      );
       return VibeFolderSyncResult(
         scannedCount: 0,
         upsertedCount: 0,
@@ -224,7 +228,7 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
 
     try {
       final results = await Future.wait([
-        _storage.getAllEntries(),
+        _storage.getDisplayEntries(),
         _storage.getAllCategories(),
       ]);
       final entries = results[0] as List<VibeLibraryEntry>;
@@ -447,10 +451,11 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
       final saved = await _storage.saveEntry(entry);
       final entries = [...state.entries];
       final index = entries.indexWhere((e) => e.id == entry.id);
+      final displayEntry = saved.toDisplayEntry();
       if (index >= 0) {
-        entries[index] = saved;
+        entries[index] = displayEntry;
       } else {
-        entries.add(saved);
+        entries.add(displayEntry);
       }
       state = state.copyWith(entries: entries);
       await _applyFilters();
@@ -483,10 +488,11 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
 
       final entries = [...state.entries];
       final index = entries.indexWhere((e) => e.id == id);
+      final displayEntry = saved.toDisplayEntry();
       if (index >= 0) {
-        entries[index] = saved;
+        entries[index] = displayEntry;
       } else {
-        entries.add(saved);
+        entries.add(displayEntry);
       }
       state = state.copyWith(entries: entries);
       await _applyFilters();
@@ -513,7 +519,7 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
         categoryId: categoryId,
         tags: tags,
       );
-      final entries = [...state.entries, saved];
+      final entries = [...state.entries, saved.toDisplayEntry()];
       state = state.copyWith(entries: entries);
       await _applyFilters();
       AppLogger.d('Bundle entry saved: ${saved.displayName}', 'VibeLibrary');
@@ -570,10 +576,11 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
     try {
       final updated = await _storage.toggleFavorite(id);
       if (updated == null) return null;
+      final displayEntry = updated.toDisplayEntry();
 
       // 更新本地状态
       final updatedEntries = state.entries.map((e) {
-        return e.id == id ? updated : e;
+        return e.id == id ? displayEntry : e;
       }).toList();
 
       state = state.copyWith(entries: updatedEntries);
@@ -599,10 +606,11 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
     try {
       final updated = await _storage.updateEntryCategory(id, categoryId);
       if (updated == null) return null;
+      final displayEntry = updated.toDisplayEntry();
 
       // 更新本地状态
       final updatedEntries = state.entries.map((e) {
-        return e.id == id ? updated : e;
+        return e.id == id ? displayEntry : e;
       }).toList();
 
       state = state.copyWith(entries: updatedEntries);
@@ -633,10 +641,11 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
     try {
       final updated = await _storage.updateEntryTags(id, tags);
       if (updated == null) return null;
+      final displayEntry = updated.toDisplayEntry();
 
       // 更新本地状态
       final updatedEntries = state.entries.map((e) {
-        return e.id == id ? updated : e;
+        return e.id == id ? displayEntry : e;
       }).toList();
 
       state = state.copyWith(entries: updatedEntries);
@@ -658,10 +667,11 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
     try {
       final updated = await _storage.updateEntryThumbnail(id, thumbnail);
       if (updated == null) return null;
+      final displayEntry = updated.toDisplayEntry();
 
       // 更新本地状态
       final updatedEntries = state.entries.map((e) {
-        return e.id == id ? updated : e;
+        return e.id == id ? displayEntry : e;
       }).toList();
 
       state = state.copyWith(entries: updatedEntries);
@@ -693,8 +703,9 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
       }
 
       final updated = result.entry!;
+      final displayEntry = updated.toDisplayEntry();
       final updatedEntries = state.entries.map((e) {
-        return e.id == id ? updated : e;
+        return e.id == id ? displayEntry : e;
       }).toList();
 
       state = state.copyWith(entries: updatedEntries);
@@ -716,10 +727,11 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
     try {
       final updated = await _storage.incrementUsedCount(id);
       if (updated == null) return null;
+      final displayEntry = updated.toDisplayEntry();
 
       // 更新本地状态
       final updatedEntries = state.entries.map((e) {
-        return e.id == id ? updated : e;
+        return e.id == id ? displayEntry : e;
       }).toList();
 
       state = state.copyWith(entries: updatedEntries);

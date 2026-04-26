@@ -115,7 +115,7 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
               .toList()
           : await ref
               .read(vibeLibraryStorageServiceProvider)
-              .getRecentEntries(limit: 20);
+              .getRecentDisplayEntries(limit: 20);
       final uniqueEntries = entries.deduplicateByEncodingAndThumbnail(limit: 5);
 
       if (mounted) {
@@ -144,6 +144,12 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
 
   /// 从库条目添加 Vibe（用于拖拽和最近使用）
   Future<void> _addLibraryVibe(VibeLibraryEntry entry) async {
+    final storageService = ref.read(vibeLibraryStorageServiceProvider);
+    final actualEntry = await storageService.getEntry(entry.id) ?? entry;
+    if (!mounted) {
+      return;
+    }
+
     final notifier = ref.read(generationParamsNotifierProvider.notifier);
     final vibes = ref.read(generationParamsNotifierProvider).vibeReferencesV4;
 
@@ -156,29 +162,26 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
     }
 
     // 如果是 bundle，直接展开添加（不显示选择对话框）
-    if (entry.isBundle) {
+    if (actualEntry.isBundle) {
       final handler = VibeImportHandler(ref: ref, context: context);
-      final added = await handler.extractAndAddBundleVibes(entry);
+      final added = await handler.extractAndAddBundleVibes(actualEntry);
       if (added > 0) {
-        await ref
-            .read(vibeLibraryStorageServiceProvider)
-            .incrementUsedCount(entry.id);
+        await storageService.incrementUsedCount(actualEntry.id);
       }
       return;
     }
 
     // 添加 Vibe 到生成参数
-    final vibe = entry.toVibeReference();
-    notifier.addVibeReferences([vibe]);
+    final vibe = actualEntry.toVibeReference();
+    notifier.addVibeReferences([vibe], recordUsage: false);
 
     // 更新使用统计
-    final storageService = ref.read(vibeLibraryStorageServiceProvider);
-    await storageService.incrementUsedCount(entry.id);
+    await storageService.incrementUsedCount(actualEntry.id);
 
     if (mounted) {
       AppToast.success(
         context,
-        '${entry.displayName} ${context.l10n.common_added}',
+        '${actualEntry.displayName} ${context.l10n.common_added}',
       );
     }
   }

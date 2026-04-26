@@ -87,7 +87,7 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
 
   Future<void> _loadRecentEntries() async {
     try {
-      final entries = await _storageService.getRecentEntries(limit: 20);
+      final entries = await _storageService.getRecentDisplayEntries(limit: 20);
       final uniqueEntries = entries.deduplicateByEncodingAndThumbnail(limit: 5);
       state = state.copyWith(recentEntries: uniqueEntries);
     } catch (e, stackTrace) {
@@ -124,8 +124,7 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
   /// 从库中查找已存在的相同 vibe 条目
   /// 基于 vibeEncoding 或缩略图哈希进行匹配
   Future<VibeLibraryEntry?> findExistingEntry(VibeReference vibe) async {
-    final allEntries = await _storageService.getAllEntries();
-    return allEntries.findMatchingEntry(vibe);
+    return _storageService.findMatchingEntry(vibe);
   }
 
   /// 立即编码 Vibes（调用 API）
@@ -297,7 +296,7 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
       }
 
       if (extractedVibes.isNotEmpty) {
-        notifier.addVibeReferences(extractedVibes);
+        notifier.addVibeReferences(extractedVibes, recordUsage: false);
       }
 
       return extractedVibes.length;
@@ -330,7 +329,7 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
     }
 
     final vibe = actualEntry.toVibeReference();
-    notifier.addVibeReferences([vibe]);
+    notifier.addVibeReferences([vibe], recordUsage: false);
     await _storageService.incrementUsedCount(actualEntry.id);
     await _loadRecentEntries();
 
@@ -359,7 +358,7 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
     }
 
     final vibe = actualEntry.toVibeReference();
-    notifier.addVibeReferences([vibe]);
+    notifier.addVibeReferences([vibe], recordUsage: false);
     await _storageService.incrementUsedCount(actualEntry.id);
 
     return true;

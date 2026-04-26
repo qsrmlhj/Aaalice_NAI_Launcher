@@ -581,7 +581,9 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
             if (!mounted) {
               return;
             }
-            ref.read(vibeLibraryNotifierProvider.notifier).setSearchQuery(value);
+            ref
+                .read(vibeLibraryNotifierProvider.notifier)
+                .setSearchQuery(value);
           });
         },
         onSubmitted: (value) {
@@ -750,7 +752,9 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
       label: '刷新',
       tooltip: '刷新Vibe库',
       onPressed: () {
-        ref.read(vibeLibraryNotifierProvider.notifier).reload();
+        ref
+            .read(vibeLibraryNotifierProvider.notifier)
+            .reload(syncFileSystem: true, showLoading: true);
       },
     );
   }
@@ -830,7 +834,9 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
       return GalleryErrorView(
         error: state.error,
         onRetry: () {
-          ref.read(vibeLibraryNotifierProvider.notifier).reload();
+          ref
+              .read(vibeLibraryNotifierProvider.notifier)
+              .reload(syncFileSystem: true, showLoading: true);
         },
       );
     }
@@ -1050,9 +1056,8 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
     }
 
     // 获取选中的条目
-    final state = ref.read(vibeLibraryNotifierProvider);
-    final selectedEntries =
-        state.entries.where((e) => selectedIds.contains(e.id)).toList();
+    final selectedEntries = await _resolveEntriesByIds(selectedIds);
+    if (selectedEntries.isEmpty) return;
 
     // 获取当前的生成参数
     final paramsNotifier = ref.read(generationParamsNotifierProvider.notifier);
@@ -1088,7 +1093,7 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
 
     // 添加选中的Vibe到生成参数
     final vibes = selectedEntries.map((e) => e.toVibeReference()).toList();
-    paramsNotifier.addVibeReferences(vibes);
+    paramsNotifier.addVibeReferences(vibes, recordUsage: false);
 
     // 显示成功提示
     if (mounted) {
@@ -1111,9 +1116,7 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
 
     if (ids.isEmpty) return;
 
-    final state = ref.read(vibeLibraryNotifierProvider);
-    final selectedEntries =
-        state.entries.where((e) => ids.contains(e.id)).toList();
+    final selectedEntries = await _resolveEntriesByIds(ids);
 
     if (selectedEntries.isEmpty) return;
 
@@ -1331,8 +1334,11 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
     // 单独处理每张图片，以便支持无 Vibe 数据图片的编码流程
     for (var i = 0; i < imageItems.length; i++) {
       final imageItem = imageItems[i];
-      onProgress(i + 1, totalCount,
-          '导入图片(${i + 1}/${imageItems.length}): ${imageItem.source}');
+      onProgress(
+        i + 1,
+        totalCount,
+        '导入图片(${i + 1}/${imageItems.length}): ${imageItem.source}',
+      );
 
       // 检测是否经过编码流程
       final result = await _processSingleImageImport(
@@ -1478,9 +1484,10 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
   /// 导出 Vibe (使用 V2 对话框)
   Future<void> _exportVibes({List<VibeLibraryEntry>? specificEntries}) async {
     final state = ref.read(vibeLibraryNotifierProvider);
-    final entriesToExport = specificEntries ?? state.entries;
+    final entriesToExport =
+        await _resolveEntriesForAction(specificEntries ?? state.entries);
 
-    if (entriesToExport.isEmpty) return;
+    if (entriesToExport.isEmpty || !mounted) return;
 
     await showDialog<void>(
       context: context,
@@ -1488,6 +1495,39 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
         entries: entriesToExport,
       ),
     );
+  }
+
+  Future<List<VibeLibraryEntry>> _resolveEntriesByIds(List<String> ids) async {
+    if (ids.isEmpty) return const [];
+
+    final state = ref.read(vibeLibraryNotifierProvider);
+    final entriesById = {
+      for (final entry in state.entries) entry.id: entry,
+    };
+    final entries = <VibeLibraryEntry>[];
+    for (final id in ids) {
+      final entry = entriesById[id];
+      if (entry != null) {
+        entries.add(entry);
+      }
+    }
+
+    return _resolveEntriesForAction(entries);
+  }
+
+  Future<List<VibeLibraryEntry>> _resolveEntriesForAction(
+    List<VibeLibraryEntry> entries,
+  ) async {
+    if (entries.isEmpty) return const [];
+
+    final storage = ref.read(vibeLibraryStorageServiceProvider);
+    final resolvedEntries = <VibeLibraryEntry>[];
+
+    for (final entry in entries) {
+      resolvedEntries.add(await storage.getEntry(entry.id) ?? entry);
+    }
+
+    return resolvedEntries;
   }
 
   /// 递归扫描文件夹内可导入的图片和 Vibe 文件
@@ -1719,7 +1759,8 @@ class _VibeLibraryScreenState extends ConsumerState<VibeLibraryScreen> {
       }
     } finally {
       _endImportSession();
-      if (mounted && (_isImporting || _importProgress != const ImportProgress())) {
+      if (mounted &&
+          (_isImporting || _importProgress != const ImportProgress())) {
         setState(() {
           _isImporting = false;
           _importProgress = const ImportProgress();
