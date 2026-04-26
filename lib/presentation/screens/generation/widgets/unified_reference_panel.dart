@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/utils/app_logger.dart';
 import '../../../../core/utils/localization_extension.dart';
+import '../../../../core/utils/vibe_performance_diagnostics.dart';
 import '../../../../core/constants/storage_keys.dart';
 import '../../../../core/extensions/vibe_library_extensions.dart';
 import '../../../widgets/common/themed_divider.dart';
@@ -97,16 +98,36 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
   /// 恢复保存的生成状态
   Future<void> _restoreGenerationState() async {
     await Future.delayed(const Duration(milliseconds: 100));
-    if (mounted) {
-      final notifier = ref.read(generationParamsNotifierProvider.notifier);
-      await notifier.restoreGenerationState();
+    final span = VibePerformanceDiagnostics.start(
+      'unifiedReference.restoreGenerationState',
+    );
+    var restored = false;
+    try {
+      if (mounted) {
+        final notifier = ref.read(generationParamsNotifierProvider.notifier);
+        await notifier.restoreGenerationState();
+        restored = true;
+      }
+    } finally {
+      span.finish(
+        details: {
+          'restored': restored,
+        },
+      );
     }
   }
 
   /// 加载最近使用的条目
   Future<void> _loadRecentEntries() async {
+    final span = VibePerformanceDiagnostics.start(
+      'unifiedReference.loadRecentEntries',
+    );
+    var usedCachedEntries = false;
+    var entryCount = 0;
+    var uniqueCount = 0;
     try {
       final cachedEntries = ref.read(vibeLibraryNotifierProvider).entries;
+      usedCachedEntries = cachedEntries.isNotEmpty;
       final entries = cachedEntries.isNotEmpty
           ? ([
               ...cachedEntries.where((entry) => entry.lastUsedAt != null),
@@ -116,7 +137,9 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
           : await ref
               .read(vibeLibraryStorageServiceProvider)
               .getRecentDisplayEntries(limit: 20);
+      entryCount = entries.length;
       final uniqueEntries = entries.deduplicateByEncodingAndThumbnail(limit: 5);
+      uniqueCount = uniqueEntries.length;
 
       if (mounted) {
         setState(() {
@@ -125,6 +148,14 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
       }
     } catch (e, stackTrace) {
       AppLogger.e('Failed to load recent vibes', e, stackTrace);
+    } finally {
+      span.finish(
+        details: {
+          'usedCachedEntries': usedCachedEntries,
+          'entries': entryCount,
+          'uniqueEntries': uniqueCount,
+        },
+      );
     }
   }
 
@@ -144,44 +175,67 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
 
   /// 从库条目添加 Vibe（用于拖拽和最近使用）
   Future<void> _addLibraryVibe(VibeLibraryEntry entry) async {
+    final span = VibePerformanceDiagnostics.start(
+      'unifiedReference.addLibraryVibe',
+      details: {
+        'entryId': entry.id,
+        'isBundle': entry.isBundle,
+      },
+    );
+    var hydrated = false;
+    var addedFromBundle = 0;
+    var success = false;
     final storageService = ref.read(vibeLibraryStorageServiceProvider);
-    final actualEntry = await storageService.getEntry(entry.id) ?? entry;
-    if (!mounted) {
-      return;
-    }
+    try {
+      final actualEntry = await storageService.getEntry(entry.id) ?? entry;
+      hydrated = true;
+      if (!mounted) {
+        return;
+      }
 
-    final notifier = ref.read(generationParamsNotifierProvider.notifier);
-    final vibes = ref.read(generationParamsNotifierProvider).vibeReferencesV4;
+      final notifier = ref.read(generationParamsNotifierProvider.notifier);
+      final vibes = ref.read(generationParamsNotifierProvider).vibeReferencesV4;
 
-    // 检查是否超过 16 个限制
-    if (vibes.length >= 16) {
+      // 检查是否超过 16 个限制
+      if (vibes.length >= 16) {
+        if (mounted) {
+          AppToast.warning(context, context.l10n.vibe_maxReached);
+        }
+        return;
+      }
+
+      // 如果是 bundle，直接展开添加（不显示选择对话框）
+      if (actualEntry.isBundle) {
+        final handler = VibeImportHandler(ref: ref, context: context);
+        addedFromBundle = await handler.extractAndAddBundleVibes(actualEntry);
+        if (addedFromBundle > 0) {
+          await storageService.incrementUsedCount(actualEntry.id);
+          success = true;
+        }
+        return;
+      }
+
+      // 添加 Vibe 到生成参数
+      final vibe = actualEntry.toVibeReference();
+      notifier.addVibeReferences([vibe], recordUsage: false);
+
+      // 更新使用统计
+      await storageService.incrementUsedCount(actualEntry.id);
+      success = true;
+
       if (mounted) {
-        AppToast.warning(context, context.l10n.vibe_maxReached);
+        AppToast.success(
+          context,
+          '${actualEntry.displayName} ${context.l10n.common_added}',
+        );
       }
-      return;
-    }
-
-    // 如果是 bundle，直接展开添加（不显示选择对话框）
-    if (actualEntry.isBundle) {
-      final handler = VibeImportHandler(ref: ref, context: context);
-      final added = await handler.extractAndAddBundleVibes(actualEntry);
-      if (added > 0) {
-        await storageService.incrementUsedCount(actualEntry.id);
-      }
-      return;
-    }
-
-    // 添加 Vibe 到生成参数
-    final vibe = actualEntry.toVibeReference();
-    notifier.addVibeReferences([vibe], recordUsage: false);
-
-    // 更新使用统计
-    await storageService.incrementUsedCount(actualEntry.id);
-
-    if (mounted) {
-      AppToast.success(
-        context,
-        '${actualEntry.displayName} ${context.l10n.common_added}',
+    } finally {
+      span.finish(
+        details: {
+          'hydrated': hydrated,
+          'addedFromBundle': addedFromBundle,
+          'success': success,
+        },
       );
     }
   }
@@ -282,7 +336,7 @@ class _UnifiedReferencePanelState extends ConsumerState<UnifiedReferencePanel> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         decoration: BoxDecoration(
           color: showBackground
-              ? Colors.white.withOpacity(0.2)
+              ? Colors.white.withValues(alpha: 0.2)
               : theme.colorScheme.primaryContainer,
           borderRadius: BorderRadius.circular(12),
         ),

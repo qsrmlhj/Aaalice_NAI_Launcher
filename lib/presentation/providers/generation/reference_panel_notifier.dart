@@ -8,6 +8,7 @@ import '../../../core/constants/storage_keys.dart';
 import '../../../core/extensions/vibe_library_extensions.dart';
 import '../../../core/utils/app_logger.dart';
 import '../../../core/utils/vibe_file_parser.dart';
+import '../../../core/utils/vibe_performance_diagnostics.dart';
 import '../../../data/models/vibe/vibe_library_entry.dart';
 import '../../../data/models/vibe/vibe_reference.dart';
 import '../../../data/services/vibe_file_storage_service.dart';
@@ -86,12 +87,26 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
   }
 
   Future<void> _loadRecentEntries() async {
+    final span = VibePerformanceDiagnostics.start(
+      'referencePanel.loadRecentEntries',
+    );
+    var entryCount = 0;
+    var uniqueCount = 0;
     try {
       final entries = await _storageService.getRecentDisplayEntries(limit: 20);
+      entryCount = entries.length;
       final uniqueEntries = entries.deduplicateByEncodingAndThumbnail(limit: 5);
+      uniqueCount = uniqueEntries.length;
       state = state.copyWith(recentEntries: uniqueEntries);
     } catch (e, stackTrace) {
       AppLogger.e('Failed to load recent vibes', e, stackTrace);
+    } finally {
+      span.finish(
+        details: {
+          'entries': entryCount,
+          'uniqueEntries': uniqueCount,
+        },
+      );
     }
   }
 
@@ -273,14 +288,24 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
     required VibeLibraryEntry entry,
     required int maxCount,
   }) async {
+    final span = VibePerformanceDiagnostics.start(
+      'referencePanel.addBundleVibesToGeneration',
+      details: {
+        'entryId': entry.id,
+        'bundledVibes': entry.bundledVibeCount,
+        'maxCount': maxCount,
+      },
+    );
+    var extractedCount = 0;
+    var availableSlots = 0;
     final notifier = ref.read(generationParamsNotifierProvider.notifier);
     final currentCount =
         ref.read(generationParamsNotifierProvider).vibeReferencesV4.length;
-    final availableSlots = maxCount - currentCount;
-
-    if (availableSlots <= 0 || entry.filePath == null) return 0;
+    availableSlots = maxCount - currentCount;
 
     try {
+      if (availableSlots <= 0 || entry.filePath == null) return 0;
+
       final fileStorage = VibeFileStorageService();
       final extractedVibes = <VibeReference>[];
 
@@ -298,97 +323,161 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
       if (extractedVibes.isNotEmpty) {
         notifier.addVibeReferences(extractedVibes, recordUsage: false);
       }
+      extractedCount = extractedVibes.length;
 
       return extractedVibes.length;
     } catch (e, stackTrace) {
       AppLogger.e('从 Bundle 提取 Vibe 失败', e, stackTrace);
       return 0;
+    } finally {
+      span.finish(
+        details: {
+          'availableSlots': availableSlots,
+          'extracted': extractedCount,
+        },
+      );
     }
   }
 
   /// 添加最近使用的 Vibe
   Future<bool> addRecentVibe(VibeLibraryEntry entry) async {
+    final span = VibePerformanceDiagnostics.start(
+      'referencePanel.addRecentVibe',
+      details: {
+        'entryId': entry.id,
+        'isBundle': entry.isBundle,
+      },
+    );
+    var success = false;
+    var addedFromBundle = 0;
     final notifier = ref.read(generationParamsNotifierProvider.notifier);
     final vibes = ref.read(generationParamsNotifierProvider).vibeReferencesV4;
     final actualEntry = await _storageService.getEntry(entry.id) ?? entry;
 
-    if (vibes.length >= 16) {
-      return false;
-    }
-
-    if (actualEntry.isBundle) {
-      final added = await _addBundleVibesToGeneration(
-        entry: actualEntry,
-        maxCount: 16,
-      );
-      if (added > 0) {
-        await _storageService.incrementUsedCount(actualEntry.id);
-        await _loadRecentEntries();
+    try {
+      if (vibes.length >= 16) {
+        return false;
       }
-      return added > 0;
+
+      if (actualEntry.isBundle) {
+        addedFromBundle = await _addBundleVibesToGeneration(
+          entry: actualEntry,
+          maxCount: 16,
+        );
+        if (addedFromBundle > 0) {
+          await _storageService.incrementUsedCount(actualEntry.id);
+          await _loadRecentEntries();
+        }
+        success = addedFromBundle > 0;
+        return success;
+      }
+
+      final vibe = actualEntry.toVibeReference();
+      notifier.addVibeReferences([vibe], recordUsage: false);
+      await _storageService.incrementUsedCount(actualEntry.id);
+      await _loadRecentEntries();
+
+      success = true;
+      return true;
+    } finally {
+      span.finish(
+        details: {
+          'success': success,
+          'addedFromBundle': addedFromBundle,
+        },
+      );
     }
-
-    final vibe = actualEntry.toVibeReference();
-    notifier.addVibeReferences([vibe], recordUsage: false);
-    await _storageService.incrementUsedCount(actualEntry.id);
-    await _loadRecentEntries();
-
-    return true;
   }
 
   /// 从库中添加 Vibe（用于拖拽）
   Future<bool> addLibraryVibe(VibeLibraryEntry entry) async {
+    final span = VibePerformanceDiagnostics.start(
+      'referencePanel.addLibraryVibe',
+      details: {
+        'entryId': entry.id,
+        'isBundle': entry.isBundle,
+      },
+    );
+    var success = false;
+    var addedFromBundle = 0;
     final notifier = ref.read(generationParamsNotifierProvider.notifier);
     final vibes = ref.read(generationParamsNotifierProvider).vibeReferencesV4;
     final actualEntry = await _storageService.getEntry(entry.id) ?? entry;
 
-    if (vibes.length >= 16) {
-      return false;
-    }
-
-    if (actualEntry.isBundle) {
-      final added = await _addBundleVibesToGeneration(
-        entry: actualEntry,
-        maxCount: 16,
-      );
-      if (added > 0) {
-        await _storageService.incrementUsedCount(actualEntry.id);
+    try {
+      if (vibes.length >= 16) {
+        return false;
       }
-      return added > 0;
+
+      if (actualEntry.isBundle) {
+        addedFromBundle = await _addBundleVibesToGeneration(
+          entry: actualEntry,
+          maxCount: 16,
+        );
+        if (addedFromBundle > 0) {
+          await _storageService.incrementUsedCount(actualEntry.id);
+        }
+        success = addedFromBundle > 0;
+        return success;
+      }
+
+      final vibe = actualEntry.toVibeReference();
+      notifier.addVibeReferences([vibe], recordUsage: false);
+      await _storageService.incrementUsedCount(actualEntry.id);
+
+      success = true;
+      return true;
+    } finally {
+      span.finish(
+        details: {
+          'success': success,
+          'addedFromBundle': addedFromBundle,
+        },
+      );
     }
-
-    final vibe = actualEntry.toVibeReference();
-    notifier.addVibeReferences([vibe], recordUsage: false);
-    await _storageService.incrementUsedCount(actualEntry.id);
-
-    return true;
   }
 
   /// 从 bundle 中提取并添加所有 vibes
   Future<int> addVibesFromBundle(VibeLibraryEntry entry) async {
-    if (entry.filePath == null) {
-      return 0;
-    }
-
-    final currentCount =
-        ref.read(generationParamsNotifierProvider).vibeReferencesV4.length;
-    final availableSlots = 16 - currentCount;
-
-    if (availableSlots <= 0) {
-      return 0;
-    }
-
-    final added = await _addBundleVibesToGeneration(
-      entry: entry,
-      maxCount: 16,
+    final span = VibePerformanceDiagnostics.start(
+      'referencePanel.addVibesFromBundle',
+      details: {
+        'entryId': entry.id,
+        'bundledVibes': entry.bundledVibeCount,
+      },
     );
+    var added = 0;
+    try {
+      if (entry.filePath == null) {
+        return 0;
+      }
 
-    if (added > 0) {
-      await _storageService.incrementUsedCount(entry.id);
-      await _loadRecentEntries();
+      final currentCount =
+          ref.read(generationParamsNotifierProvider).vibeReferencesV4.length;
+      final availableSlots = 16 - currentCount;
+
+      if (availableSlots <= 0) {
+        return 0;
+      }
+
+      added = await _addBundleVibesToGeneration(
+        entry: entry,
+        maxCount: 16,
+      );
+
+      if (added > 0) {
+        await _storageService.incrementUsedCount(entry.id);
+        await _loadRecentEntries();
+      }
+
+      return added;
+    } finally {
+      span.finish(
+        details: {
+          'added': added,
+        },
+      );
     }
-
-    return added;
   }
 
   /// 解析并添加 Vibe 文件
@@ -396,12 +485,23 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
     String fileName,
     Uint8List bytes,
   ) async {
-    try {
-      return await VibeFileParser.parseFile(fileName, bytes);
-    } catch (e) {
-      AppLogger.e('Failed to parse vibe file: $fileName', e);
-      return null;
-    }
+    return VibePerformanceDiagnostics.measure(
+      'referencePanel.parseVibeFile',
+      () async {
+        try {
+          return await VibeFileParser.parseFile(fileName, bytes);
+        } catch (e) {
+          AppLogger.e('Failed to parse vibe file: $fileName', e);
+          return null;
+        }
+      },
+      details: {
+        'bytes': bytes.length,
+      },
+      resultDetails: (vibes) => {
+        'parsedVibes': vibes?.length ?? 0,
+      },
+    );
   }
 
   /// 检查 vibes 是否需要编码

@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/enums/precise_ref_type.dart';
 import '../../../core/storage/local_storage_service.dart';
 import '../../../core/utils/app_logger.dart';
+import '../../../core/utils/vibe_performance_diagnostics.dart';
 import '../../../data/datasources/remote/nai_image_enhancement_api_service.dart';
 import '../../../data/models/image/image_params.dart';
 import '../../../data/models/vibe/vibe_library_entry.dart';
@@ -64,24 +65,46 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
 
   /// 加载最近使用的 Vibes
   Future<void> loadRecentVibes() async {
+    final span = VibePerformanceDiagnostics.start(
+      'generation.loadRecentVibes',
+    );
+    var entryCount = 0;
     try {
       final storageService = ref.read(vibeLibraryStorageServiceProvider);
       final entries = await storageService.getRecentDisplayEntries(limit: 20);
+      entryCount = entries.length;
       _recentVibes = entries;
       // 通知监听器更新
       state = state.copyWith();
     } catch (e, stackTrace) {
       AppLogger.e('Failed to load recent vibes', e, stackTrace);
+    } finally {
+      span.finish(
+        details: {
+          'entries': entryCount,
+        },
+      );
     }
   }
 
   /// 记录 Vibe 使用并更新最近列表
   Future<void> _recordVibeUsage(VibeReference vibe) async {
+    final span = VibePerformanceDiagnostics.start(
+      'generation.recordVibeUsage',
+      details: {
+        'hasEncoding': vibe.vibeEncoding.isNotEmpty,
+        'hasThumbnail': vibe.thumbnail?.isNotEmpty == true,
+        'hasRawImage': vibe.rawImageData?.isNotEmpty == true,
+      },
+    );
+    var matchedExisting = false;
+    var createdEntry = false;
     try {
       final storageService = ref.read(vibeLibraryStorageServiceProvider);
       final existingEntry = await storageService.findMatchingEntry(vibe);
 
       if (existingEntry != null) {
+        matchedExisting = true;
         // 更新现有条目的使用时间
         await storageService.incrementUsedCount(existingEntry.id);
       } else if (vibe.vibeEncoding.isNotEmpty) {
@@ -92,12 +115,20 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
         );
         await storageService.saveEntry(newEntry);
         await storageService.incrementUsedCount(newEntry.id);
+        createdEntry = true;
       }
 
       // 重新加载最近列表
       await loadRecentVibes();
     } catch (e, stackTrace) {
       AppLogger.e('Failed to record vibe usage', e, stackTrace);
+    } finally {
+      span.finish(
+        details: {
+          'matchedExisting': matchedExisting,
+          'createdEntry': createdEntry,
+        },
+      );
     }
   }
 
@@ -666,59 +697,86 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
     List<VibeReference> vibes, {
     bool recordUsage = true,
   }) {
-    // 分批处理：先找出已存在的和新的
-    final toReorder = <VibeReference>[];
-    final toAdd = <VibeReference>[];
+    final span = VibePerformanceDiagnostics.start(
+      'generation.addVibeReferences',
+      details: {
+        'inputVibes': vibes.length,
+        'recordUsage': recordUsage,
+        'existingVibes': state.vibeReferencesV4.length,
+      },
+    );
+    var toAddCount = 0;
+    var toReorderCount = 0;
+    var addedCount = 0;
+    var finalCount = state.vibeReferencesV4.length;
+    try {
+      // 分批处理：先找出已存在的和新的
+      final toReorder = <VibeReference>[];
+      final toAdd = <VibeReference>[];
 
-    for (final vibe in vibes) {
-      final existingIndex = _findVibeIndex(state.vibeReferencesV4, vibe);
-      if (existingIndex >= 0) {
-        toReorder.add(vibe);
-      } else {
-        toAdd.add(vibe);
+      for (final vibe in vibes) {
+        final existingIndex = _findVibeIndex(state.vibeReferencesV4, vibe);
+        if (existingIndex >= 0) {
+          toReorder.add(vibe);
+        } else {
+          toAdd.add(vibe);
+        }
       }
-    }
+      toAddCount = toAdd.length;
+      toReorderCount = toReorder.length;
 
-    // 如果没有需要处理的，直接返回
-    if (toReorder.isEmpty && toAdd.isEmpty) return;
+      // 如果没有需要处理的，直接返回
+      if (toReorder.isEmpty && toAdd.isEmpty) return;
 
-    // 构建新列表：移除已存在的，添加所有新的（调整顺序）
-    var newVibes = [...state.vibeReferencesV4];
+      // 构建新列表：移除已存在的，添加所有新的（调整顺序）
+      var newVibes = [...state.vibeReferencesV4];
 
-    // 先移除需要调整顺序的
-    for (final vibe in toReorder) {
-      final index = _findVibeIndex(newVibes, vibe);
-      if (index >= 0) {
-        newVibes = [
-          ...newVibes.sublist(0, index),
-          ...newVibes.sublist(index + 1),
-        ];
+      // 先移除需要调整顺序的
+      for (final vibe in toReorder) {
+        final index = _findVibeIndex(newVibes, vibe);
+        if (index >= 0) {
+          newVibes = [
+            ...newVibes.sublist(0, index),
+            ...newVibes.sublist(index + 1),
+          ];
+        }
       }
-    }
 
-    // 添加所有新的（先添加 toAdd，再添加 toReorder 到末尾）
-    final availableSlots = 16 - newVibes.length;
-    final canAdd = toAdd.take(availableSlots).toList();
-    newVibes = [...newVibes, ...canAdd, ...toReorder];
+      // 添加所有新的（先添加 toAdd，再添加 toReorder 到末尾）
+      final availableSlots = 16 - newVibes.length;
+      final canAdd = toAdd.take(availableSlots).toList();
+      addedCount = canAdd.length + toReorder.length;
+      newVibes = [...newVibes, ...canAdd, ...toReorder];
 
-    // 限制最多 16 个（如果超过，保留后 16 个）
-    if (newVibes.length > 16) {
-      newVibes = newVibes.sublist(newVibes.length - 16);
-    }
-
-    for (final vibe in newVibes) {
-      _primeVibeEncodingCache(vibe);
-    }
-
-    // 更新状态
-    state = state.copyWith(vibeReferencesV4: newVibes);
-    _scheduleGenerationStateSave(immediate: true);
-
-    if (recordUsage) {
-      // 记录使用
-      for (final vibe in [...canAdd, ...toReorder]) {
-        _recordVibeUsage(vibe);
+      // 限制最多 16 个（如果超过，保留后 16 个）
+      if (newVibes.length > 16) {
+        newVibes = newVibes.sublist(newVibes.length - 16);
       }
+
+      for (final vibe in newVibes) {
+        _primeVibeEncodingCache(vibe);
+      }
+
+      // 更新状态
+      state = state.copyWith(vibeReferencesV4: newVibes);
+      finalCount = newVibes.length;
+      _scheduleGenerationStateSave(immediate: true);
+
+      if (recordUsage) {
+        // 记录使用
+        for (final vibe in [...canAdd, ...toReorder]) {
+          _recordVibeUsage(vibe);
+        }
+      }
+    } finally {
+      span.finish(
+        details: {
+          'toAdd': toAddCount,
+          'toReorder': toReorderCount,
+          'added': addedCount,
+          'finalVibes': finalCount,
+        },
+      );
     }
   }
 
@@ -806,13 +864,22 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
 
   /// 设置 vibe references（替换现有）
   void setVibeReferences(List<VibeReference> vibes) {
-    // 限制最多 16 个
-    final limitedVibes = vibes.take(16).toList();
-    for (final vibe in limitedVibes) {
-      _primeVibeEncodingCache(vibe);
-    }
-    state = state.copyWith(vibeReferencesV4: limitedVibes);
-    _scheduleGenerationStateSave(immediate: true);
+    VibePerformanceDiagnostics.measureSync(
+      'generation.setVibeReferences',
+      () {
+        // 限制最多 16 个
+        final limitedVibes = vibes.take(16).toList();
+        for (final vibe in limitedVibes) {
+          _primeVibeEncodingCache(vibe);
+        }
+        state = state.copyWith(vibeReferencesV4: limitedVibes);
+        _scheduleGenerationStateSave(immediate: true);
+      },
+      details: {
+        'inputVibes': vibes.length,
+        'existingVibes': state.vibeReferencesV4.length,
+      },
+    );
   }
 
   /// 设置 Vibe 强度标准化开关
@@ -1031,7 +1098,14 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
     final activeSave = _generationStateSaveInFlight;
     if (activeSave != null) {
       _hasQueuedGenerationStateSave = true;
-      return activeSave;
+      return VibePerformanceDiagnostics.measure(
+        'generation.awaitActiveStateSave',
+        () async => activeSave,
+        details: {
+          'vibes': state.vibeReferencesV4.length,
+          'preciseRefs': state.preciseReferences.length,
+        },
+      );
     }
 
     final saveOperation = _runGenerationStateSaveLoop().whenComplete(() {
@@ -1042,15 +1116,33 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
   }
 
   Future<void> _runGenerationStateSaveLoop() async {
-    do {
-      await Future<void>.delayed(Duration.zero);
-      _hasQueuedGenerationStateSave = false;
-      if (_isRestoringGenerationState || _isDisposed) {
-        return;
-      }
+    final span = VibePerformanceDiagnostics.start(
+      'generation.runStateSaveLoop',
+      details: {
+        'vibes': state.vibeReferencesV4.length,
+        'preciseRefs': state.preciseReferences.length,
+      },
+    );
+    var iterations = 0;
+    try {
+      do {
+        iterations++;
+        await Future<void>.delayed(Duration.zero);
+        _hasQueuedGenerationStateSave = false;
+        if (_isRestoringGenerationState || _isDisposed) {
+          return;
+        }
 
-      await _saveGenerationStateSnapshot();
-    } while (_hasQueuedGenerationStateSave);
+        await _saveGenerationStateSnapshot();
+      } while (_hasQueuedGenerationStateSave);
+    } finally {
+      span.finish(
+        details: {
+          'iterations': iterations,
+          'queuedAgain': _hasQueuedGenerationStateSave,
+        },
+      );
+    }
   }
 
   Future<void> _saveGenerationStateSnapshot() async {
@@ -1058,6 +1150,14 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
       return;
     }
 
+    final span = VibePerformanceDiagnostics.start(
+      'generation.saveStateSnapshot',
+      details: {
+        'vibes': state.vibeReferencesV4.length,
+        'preciseRefs': state.preciseReferences.length,
+      },
+    );
+    var jsonChars = 0;
     try {
       final storageService = ref.read(vibeLibraryStorageServiceProvider);
       final saveInput = _buildGenerationStateSaveInput(
@@ -1068,12 +1168,19 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
       final stateJson = await Isolate.run(
         () => _encodeGenerationStateJson(saveInput),
       );
+      jsonChars = stateJson.length;
 
       await storageService.saveGenerationStateJson(stateJson);
 
       AppLogger.d('Generation state saved', 'GenerationParams');
     } catch (e, stackTrace) {
       AppLogger.e('Failed to save generation state', e, stackTrace);
+    } finally {
+      span.finish(
+        details: {
+          'jsonChars': jsonChars,
+        },
+      );
     }
   }
 
@@ -1083,8 +1190,14 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
       return;
     }
 
+    final span = VibePerformanceDiagnostics.start(
+      'generation.restoreState',
+    );
     _isRestoringGenerationState = true;
     var shouldRewriteGenerationState = false;
+    var jsonChars = 0;
+    var restoredVibeCount = 0;
+    var restoredPreciseRefCount = 0;
 
     try {
       final storageService = ref.read(vibeLibraryStorageServiceProvider);
@@ -1095,6 +1208,7 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
         AppLogger.d('No saved generation state found', 'GenerationParams');
         return;
       }
+      jsonChars = stateJson.length;
 
       final stateData = await Isolate.run(
         () => _decodeGenerationStateJson(stateJson),
@@ -1174,6 +1288,8 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
         normalizeVibeStrength:
             stateData['normalizeVibeStrength'] as bool? ?? true,
       );
+      restoredVibeCount = restoredVibes.length;
+      restoredPreciseRefCount = preciseRefs.length;
 
       _hasRestoredGenerationState = true;
       shouldRewriteGenerationState = true;
@@ -1189,6 +1305,14 @@ class GenerationParamsNotifier extends _$GenerationParamsNotifier {
       if (shouldRewriteGenerationState && !_isDisposed) {
         unawaited(saveGenerationState());
       }
+      span.finish(
+        details: {
+          'jsonChars': jsonChars,
+          'restoredVibes': restoredVibeCount,
+          'restoredPreciseRefs': restoredPreciseRefCount,
+          'rewriteQueued': shouldRewriteGenerationState,
+        },
+      );
     }
   }
 

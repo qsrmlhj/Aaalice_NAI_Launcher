@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/app_logger.dart';
 import '../../../../core/utils/localization_extension.dart';
 import '../../../../core/utils/vibe_file_parser.dart';
+import '../../../../core/utils/vibe_performance_diagnostics.dart';
 import '../../../../data/models/vibe/vibe_library_entry.dart';
 import '../../../../data/models/vibe/vibe_reference.dart';
 import '../../../../data/services/vibe_file_storage_service.dart';
@@ -44,6 +45,15 @@ class VibeImportHandler {
   /// 支持格式：png, jpg, jpeg, webp, naiv4vibe, naiv4vibebundle
   /// 对于原始图片，会显示编码确认对话框
   Future<void> importFromFiles() async {
+    final span = VibePerformanceDiagnostics.start(
+      'importHandler.importFromFiles',
+    );
+    var pickedFiles = 0;
+    var parsedFiles = 0;
+    var parsedVibes = 0;
+    var addedVibes = 0;
+    var encodedFiles = 0;
+    var autoSavedFiles = 0;
     try {
       // 使用 withData: false 提高文件选择器打开速度
       // 通过路径异步读取文件内容，避免阻塞 UI
@@ -64,6 +74,7 @@ class VibeImportHandler {
       );
 
       if (result != null && result.files.isNotEmpty) {
+        pickedFiles = result.files.length;
         final notifier = ref.read(generationParamsNotifierProvider.notifier);
 
         for (final file in result.files) {
@@ -80,6 +91,8 @@ class VibeImportHandler {
           if (bytes != null) {
             try {
               var vibes = await VibeFileParser.parseFile(fileName, bytes);
+              parsedFiles++;
+              parsedVibes += vibes.length;
 
               // 检查是否需要编码
               final needsEncoding = vibes.any(
@@ -104,9 +117,11 @@ class VibeImportHandler {
                   if (!context.mounted) continue;
                   if (encodedVibes != null) {
                     vibes = encodedVibes;
+                    encodedFiles++;
                     // 编码成功后自动保存到库
                     if (autoSaveToLibrary && context.mounted) {
                       await _saveEncodedVibesToLibrary(encodedVibes, fileName);
+                      autoSavedFiles++;
                     }
                   } else {
                     // 编码失败，询问是否继续添加未编码的
@@ -119,6 +134,7 @@ class VibeImportHandler {
               }
 
               notifier.addVibeReferences(vibes);
+              addedVibes += vibes.length;
             } catch (e) {
               if (context.mounted) {
                 AppLogger.e('Failed to parse file: $fileName', e, null, _tag);
@@ -138,6 +154,17 @@ class VibeImportHandler {
       if (context.mounted) {
         AppToast.error(context, context.l10n.vibe_import_fileSelectionFailed);
       }
+    } finally {
+      span.finish(
+        details: {
+          'pickedFiles': pickedFiles,
+          'parsedFiles': parsedFiles,
+          'parsedVibes': parsedVibes,
+          'addedVibes': addedVibes,
+          'encodedFiles': encodedFiles,
+          'autoSavedFiles': autoSavedFiles,
+        },
+      );
     }
   }
 
@@ -253,7 +280,7 @@ class VibeImportHandler {
                                       : Theme.of(context)
                                           .colorScheme
                                           .onSurface
-                                          .withOpacity(0.4),
+                                          .withValues(alpha: 0.4),
                                 ),
                           ),
                         ),
@@ -307,6 +334,21 @@ class VibeImportHandler {
   Future<List<VibeReference>?> _encodeVibesNow(
     List<VibeReference> vibes,
   ) async {
+    final span = VibePerformanceDiagnostics.start(
+      'importHandler.encodeVibesNow',
+      details: {
+        'inputVibes': vibes.length,
+        'rawImageVibes': vibes
+            .where(
+              (v) =>
+                  v.sourceType == VibeSourceType.rawImage &&
+                  v.rawImageData != null,
+            )
+            .length,
+      },
+    );
+    var encodedCount = 0;
+    var returnedCount = 0;
     final notifier = ref.read(generationParamsNotifierProvider.notifier);
     final params = ref.read(generationParamsNotifierProvider);
     final model = params.model;
@@ -377,6 +419,7 @@ class VibeImportHandler {
                 rawImageData: null, // 编码后不需要原始图片数据
               ),
             );
+            encodedCount++;
           } else {
             // 编码失败，保留原始 vibe
             encodedVibes.add(vibe);
@@ -395,6 +438,7 @@ class VibeImportHandler {
             v.sourceType != VibeSourceType.rawImage ||
             v.vibeEncoding.isNotEmpty,
       );
+      returnedCount = encodedVibes.length;
 
       if (allEncoded) {
         if (context.mounted) {
@@ -418,6 +462,13 @@ class VibeImportHandler {
       AppLogger.e('Failed to encode vibes', e, stackTrace, _tag);
       closeDialog();
       return null;
+    } finally {
+      span.finish(
+        details: {
+          'encoded': encodedCount,
+          'returnedVibes': returnedCount,
+        },
+      );
     }
   }
 
@@ -428,12 +479,17 @@ class VibeImportHandler {
     List<VibeReference> vibes,
     String baseName,
   ) async {
+    final span = VibePerformanceDiagnostics.start(
+      'importHandler.saveEncodedVibesToLibrary',
+      details: {
+        'vibes': vibes.length,
+      },
+    );
     final storageService = ref.read(vibeLibraryStorageServiceProvider);
+    var savedCount = 0;
+    var reusedCount = 0;
 
     try {
-      var savedCount = 0;
-      var reusedCount = 0;
-
       for (final vibe in vibes) {
         // 检查是否已存在相同的 vibe
         final existingEntry = await _findExistingEntry(storageService, vibe);
@@ -484,6 +540,13 @@ class VibeImportHandler {
       if (context.mounted) {
         AppToast.error(context, context.l10n.vibe_saveToLibrary_saveFailed);
       }
+    } finally {
+      span.finish(
+        details: {
+          'saved': savedCount,
+          'reused': reusedCount,
+        },
+      );
     }
   }
 
@@ -502,7 +565,14 @@ class VibeImportHandler {
   ///
   /// 显示选择器对话框，支持替换或追加模式
   Future<void> importFromLibrary() async {
+    final span = VibePerformanceDiagnostics.start(
+      'importHandler.importFromLibrary',
+    );
     final storageService = ref.read(vibeLibraryStorageServiceProvider);
+    var selectedEntries = 0;
+    var totalAdded = 0;
+    var bundleEntries = 0;
+    var replacedExisting = false;
 
     try {
       // 显示选择器对话框
@@ -514,22 +584,24 @@ class VibeImportHandler {
       );
 
       if (result == null || result.selectedEntries.isEmpty) return;
+      selectedEntries = result.selectedEntries.length;
 
       final notifier = ref.read(generationParamsNotifierProvider.notifier);
 
       if (result.shouldReplace) {
         // 替换模式：清除现有并添加新的
         notifier.clearVibeReferences();
+        replacedExisting = true;
       }
 
       // 处理每个选中的条目（支持 bundle 展开）
-      var totalAdded = 0;
       for (final entry in result.selectedEntries) {
         final currentCount =
             ref.read(generationParamsNotifierProvider).vibeReferencesV4.length;
         if (currentCount >= 16) break;
 
         if (entry.isBundle) {
+          bundleEntries++;
           // 从 bundle 提取 vibes
           final added = await extractAndAddBundleVibes(entry);
           totalAdded += added;
@@ -562,6 +634,15 @@ class VibeImportHandler {
       if (context.mounted) {
         AppToast.error(context, context.l10n.vibe_import_importFailed);
       }
+    } finally {
+      span.finish(
+        details: {
+          'selectedEntries': selectedEntries,
+          'bundleEntries': bundleEntries,
+          'totalAdded': totalAdded,
+          'replacedExisting': replacedExisting,
+        },
+      );
     }
   }
 
@@ -582,14 +663,24 @@ class VibeImportHandler {
     required int maxCount,
     required bool showToast,
   }) async {
+    final span = VibePerformanceDiagnostics.start(
+      'importHandler.addBundleVibesToGeneration',
+      details: {
+        'entryId': entry.id,
+        'bundledVibes': entry.bundledVibeCount,
+        'maxCount': maxCount,
+        'showToast': showToast,
+      },
+    );
     final notifier = ref.read(generationParamsNotifierProvider.notifier);
     final currentCount =
         ref.read(generationParamsNotifierProvider).vibeReferencesV4.length;
     final availableSlots = maxCount - currentCount;
-
-    if (availableSlots <= 0 || entry.filePath == null) return 0;
+    var extractedCount = 0;
 
     try {
+      if (availableSlots <= 0 || entry.filePath == null) return 0;
+
       final fileStorage = VibeFileStorageService();
       final extractedVibes = <VibeReference>[];
 
@@ -619,11 +710,19 @@ class VibeImportHandler {
           );
         }
       }
+      extractedCount = extractedVibes.length;
 
       return extractedVibes.length;
     } catch (e, stackTrace) {
       AppLogger.e('Failed to extract vibes from bundle', e, stackTrace, _tag);
       return 0;
+    } finally {
+      span.finish(
+        details: {
+          'availableSlots': availableSlots,
+          'extracted': extractedCount,
+        },
+      );
     }
   }
 
