@@ -682,15 +682,12 @@ class VibeImportHandler {
       if (availableSlots <= 0 || entry.filePath == null) return 0;
 
       final fileStorage = VibeFileStorageService();
-      final extractedVibes = <VibeReference>[];
-
-      for (int i = 0;
-          i < entry.bundledVibeCount.clamp(0, availableSlots);
-          i++) {
-        final vibe =
-            await fileStorage.extractVibeFromBundle(entry.filePath!, i);
-        if (vibe != null) extractedVibes.add(vibe);
-      }
+      final extractLimit =
+          entry.bundledVibeCount.clamp(0, availableSlots).toInt();
+      final extractedVibes = await fileStorage.extractVibesFromBundle(
+        entry.filePath!,
+        limit: extractLimit,
+      );
 
       if (extractedVibes.isNotEmpty) {
         // 设置 bundle 来源

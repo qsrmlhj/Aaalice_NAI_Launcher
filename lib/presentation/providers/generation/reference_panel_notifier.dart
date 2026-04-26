@@ -307,17 +307,15 @@ class ReferencePanelNotifier extends _$ReferencePanelNotifier {
       if (availableSlots <= 0 || entry.filePath == null) return 0;
 
       final fileStorage = VibeFileStorageService();
-      final extractedVibes = <VibeReference>[];
+      final extractLimit =
+          entry.bundledVibeCount.clamp(0, availableSlots).toInt();
+      final extractedVibes = await fileStorage.extractVibesFromBundle(
+        entry.filePath!,
+        limit: extractLimit,
+      );
 
-      for (int i = 0;
-          i < entry.bundledVibeCount.clamp(0, availableSlots);
-          i++) {
-        final vibe =
-            await fileStorage.extractVibeFromBundle(entry.filePath!, i);
-        if (vibe != null) {
-          extractedVibes.add(vibe);
-          recordBundleSource(vibe.displayName, entry.displayName);
-        }
+      for (final vibe in extractedVibes) {
+        recordBundleSource(vibe.displayName, entry.displayName);
       }
 
       if (extractedVibes.isNotEmpty) {

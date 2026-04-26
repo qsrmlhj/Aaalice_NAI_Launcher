@@ -96,9 +96,8 @@ class VibeFileStorageService {
     try {
       final existingJson = await file.readAsString();
       final decoded = jsonDecode(existingJson);
-      jsonData = decoded is Map<String, dynamic>
-          ? decoded
-          : <String, dynamic>{};
+      jsonData =
+          decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
     } catch (_) {
       jsonData = <String, dynamic>{};
     }
@@ -136,7 +135,8 @@ class VibeFileStorageService {
       jsonData['thumbnail'] = base64Encode(vibe.thumbnail!);
     }
 
-    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(jsonData));
+    await file
+        .writeAsString(const JsonEncoder.withIndent('  ').convert(jsonData));
     AppLogger.i('Vibe 文件覆盖成功: $filePath', _tag);
   }
 
@@ -292,28 +292,67 @@ class VibeFileStorageService {
     }
   }
 
-  /// 从 bundle 中提取单个 vibe
-  Future<VibeReference?> extractVibeFromBundle(String bundlePath, int index) async {
+  /// 从 bundle 中批量提取 vibe。
+  ///
+  /// 导入多个子 Vibe 时必须走这个入口，避免按索引重复读取和解析整份 bundle。
+  Future<List<VibeReference>> extractVibesFromBundle(
+    String bundlePath, {
+    int startIndex = 0,
+    int? limit,
+  }) async {
     try {
       final file = File(bundlePath);
       if (!await file.exists()) {
         AppLogger.w('Bundle 文件不存在: $bundlePath', _tag);
-        return null;
+        return const [];
+      }
+
+      final safeStartIndex = startIndex < 0 ? 0 : startIndex;
+      final safeLimit = limit == null || limit >= 0 ? limit : 0;
+      if (safeLimit == 0) {
+        return const [];
       }
 
       final bytes = await file.readAsBytes();
-      final vibes = await VibeFileParser.fromBundle(p.basename(bundlePath), bytes);
+      final vibes =
+          await VibeFileParser.fromBundle(p.basename(bundlePath), bytes);
 
-      if (index < 0 || index >= vibes.length) {
-        AppLogger.w('Bundle 索引越界: $index, length: ${vibes.length}', _tag);
-        return null;
+      if (safeStartIndex >= vibes.length) {
+        AppLogger.w(
+          'Bundle 起始索引越界: $safeStartIndex, length: ${vibes.length}',
+          _tag,
+        );
+        return const [];
       }
 
-      return vibes[index];
+      final endIndex = safeLimit == null
+          ? vibes.length
+          : (safeStartIndex + safeLimit)
+              .clamp(safeStartIndex, vibes.length)
+              .toInt();
+      return vibes.sublist(safeStartIndex, endIndex);
     } catch (e, stackTrace) {
-      AppLogger.e('从 Bundle 提取 Vibe 失败: $bundlePath', e, stackTrace, _tag);
+      AppLogger.e('从 Bundle 批量提取 Vibe 失败: $bundlePath', e, stackTrace, _tag);
+      return const [];
+    }
+  }
+
+  /// 从 bundle 中提取单个 vibe
+  Future<VibeReference?> extractVibeFromBundle(
+    String bundlePath,
+    int index,
+  ) async {
+    if (index < 0) {
+      AppLogger.w('Bundle 索引越界: $index', _tag);
       return null;
     }
+
+    final vibes = await extractVibesFromBundle(
+      bundlePath,
+      startIndex: index,
+      limit: 1,
+    );
+    return vibes.isEmpty ? null : vibes.first;
   }
 
   /// 从 bundle 中提取前 N 个缩略图
@@ -412,23 +451,24 @@ class VibeFileStorageService {
     // 分批并行处理文件，避免同时打开太多文件句柄
     const batchSize = 4;
     final fileList = files.whereType<File>().toList();
-    
+
     for (var i = 0; i < fileList.length; i += batchSize) {
       final batch = fileList.sublist(
         i,
         i + batchSize > fileList.length ? fileList.length : i + batchSize,
       );
-      
+
       // 并行处理当前批次
       final batchResults = await Future.wait(
         batch.map((entity) async {
           final filePath = entity.path;
           final normalizedPath = _normalizePath(filePath);
-          
+
           try {
             final existingEntry = existingPathMap[normalizedPath];
-            final discovered = await _buildEntryFromFile(filePath, existingEntry);
-            
+            final discovered =
+                await _buildEntryFromFile(filePath, existingEntry);
+
             return (
               path: normalizedPath,
               entry: discovered,
@@ -444,12 +484,12 @@ class VibeFileStorageService {
           }
         }),
       );
-      
+
       // 处理批次结果
       for (final result in batchResults) {
         scannedCount++;
         currentPathSet.add(result.path);
-        
+
         if (result.error != null) {
           failedCount++;
           errors.add(result.error!);
@@ -498,7 +538,11 @@ class VibeFileStorageService {
       final fallbackName = p.basenameWithoutExtension(filePath);
 
       if (extension == _bundleFileExtension) {
-        return await _buildBundleEntryFromFile(filePath, fallbackName, existingEntry);
+        return await _buildBundleEntryFromFile(
+          filePath,
+          fallbackName,
+          existingEntry,
+        );
       }
 
       final vibe = await loadVibeFromFile(filePath);
@@ -538,7 +582,8 @@ class VibeFileStorageService {
     ).copyWith(
       bundleId: existingEntry?.bundleId ?? p.basenameWithoutExtension(filePath),
       bundledVibeNames: names,
-      bundledVibePreviews: previews.isEmpty ? existingEntry?.bundledVibePreviews : previews,
+      bundledVibePreviews:
+          previews.isEmpty ? existingEntry?.bundledVibePreviews : previews,
       bundledVibeEncodings: encodings,
     );
   }
@@ -650,7 +695,9 @@ class VibeFileStorageService {
     return sanitized;
   }
 
-  Map<String, dynamic>? _extractBundleImportInfo(Map<String, dynamic> jsonData) {
+  Map<String, dynamic>? _extractBundleImportInfo(
+    Map<String, dynamic> jsonData,
+  ) {
     final vibes = jsonData['vibes'] as List<dynamic>?;
     if (vibes == null || vibes.isEmpty) {
       return null;
@@ -703,7 +750,8 @@ class VibeFileStorageService {
     final idSource = vibe.vibeEncoding.isNotEmpty
         ? vibe.vibeEncoding
         : base64Encode(vibe.rawImageData ?? vibe.thumbnail ?? Uint8List(0));
-    final id = base64Url.encode(utf8.encode('$idSource|$timestamp')).substring(0, 32);
+    final id =
+        base64Url.encode(utf8.encode('$idSource|$timestamp')).substring(0, 32);
 
     final isRawImage =
         vibe.sourceType == VibeSourceType.rawImage && vibe.rawImageData != null;
