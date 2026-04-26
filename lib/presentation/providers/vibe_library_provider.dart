@@ -7,6 +7,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/utils/app_logger.dart';
+import '../../core/utils/vibe_performance_diagnostics.dart';
 import '../../data/models/vibe/vibe_library_category.dart';
 import '../../data/models/vibe/vibe_library_entry.dart';
 import '../../data/models/vibe/vibe_reference.dart';
@@ -138,7 +139,9 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
   /// 初始化 Vibe 库
   Future<void> initialize() async {
     if (state.entries.isNotEmpty || state.isInitializing) return;
-    await _loadData(isInitializing: true, showLoading: true);
+    await VibePerformanceDiagnostics.measure('provider.initialize', () async {
+      await _loadData(isInitializing: true, showLoading: true);
+    });
   }
 
   /// 重新加载数据
@@ -146,25 +149,47 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
     bool syncFileSystem = false,
     bool showLoading = false,
   }) async {
-    // 先同步文件系统，确保文件增删反映在 Hive 中
-    if (syncFileSystem) {
-      await syncWithFileSystem();
-    }
-    await _loadData(isInitializing: false, showLoading: showLoading);
+    await VibePerformanceDiagnostics.measure(
+      'provider.reload',
+      () async {
+        // 先同步文件系统，确保文件增删反映在 Hive 中
+        if (syncFileSystem) {
+          await syncWithFileSystem();
+        }
+        await _loadData(isInitializing: false, showLoading: showLoading);
+      },
+      details: {
+        'syncFileSystem': syncFileSystem,
+        'showLoading': showLoading,
+      },
+    );
   }
 
   /// 仅从缓存加载数据（不扫描文件系统）- 用于快速显示
   Future<void> loadFromCache({bool showLoading = false}) async {
-    await _loadData(isInitializing: false, showLoading: showLoading);
+    await VibePerformanceDiagnostics.measure(
+      'provider.loadFromCache',
+      () async {
+        await _loadData(isInitializing: false, showLoading: showLoading);
+      },
+      details: {
+        'showLoading': showLoading,
+      },
+    );
   }
 
   /// 与文件系统同步
   /// 扫描 vibes 文件夹，添加新文件到库，删除已不存在的文件条目
   /// 同步完成后自动刷新 UI
   Future<VibeFolderSyncResult> syncWithFileSystem() async {
+    final span = VibePerformanceDiagnostics.start(
+      'provider.syncWithFileSystem',
+    );
+    VibeFolderSyncResult? syncResult;
     try {
       final result =
           await _storage.syncWithFileSystem(removeMissingEntries: true);
+      syncResult = result;
       AppLogger.i(
         'Vibe library synced: scanned=${result.scannedCount}, '
             'upserted=${result.upsertedCount}, deleted=${result.deletedCount}',
@@ -191,6 +216,15 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
         failedCount: 1,
         errors: [e.toString()],
       );
+    } finally {
+      span.finish(
+        details: {
+          'scanned': syncResult?.scannedCount,
+          'upserted': syncResult?.upsertedCount,
+          'deleted': syncResult?.deletedCount,
+          'failed': syncResult?.failedCount,
+        },
+      );
     }
   }
 
@@ -200,7 +234,15 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
   }) async {
     final activeLoad = _activeLoadFuture;
     if (activeLoad != null) {
-      return activeLoad;
+      await VibePerformanceDiagnostics.measure(
+        'provider.awaitActiveLoad',
+        () async => activeLoad,
+        details: {
+          'isInitializing': isInitializing,
+          'showLoading': showLoading,
+        },
+      );
+      return;
     }
 
     final future = _performLoadData(
@@ -221,6 +263,20 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
     required bool isInitializing,
     required bool showLoading,
   }) async {
+    final span = VibePerformanceDiagnostics.start(
+      'provider.performLoadData',
+      details: {
+        'isInitializing': isInitializing,
+        'showLoading': showLoading,
+        'searchActive': state.searchQuery.isNotEmpty,
+        'hasCategoryFilter': state.selectedCategoryId != null,
+        'favoritesOnly': state.favoritesOnly,
+      },
+    );
+    var entryCount = 0;
+    var filteredCount = 0;
+    var currentPageCount = 0;
+    var categoryCount = 0;
     state = state.copyWith(
       isLoading: showLoading,
       isInitializing: isInitializing,
@@ -233,14 +289,18 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
       ]);
       final entries = results[0] as List<VibeLibraryEntry>;
       final categories = results[1] as List<VibeLibraryCategory>;
+      entryCount = entries.length;
+      categoryCount = categories.length;
       final filteredEntries = _filterEntries(
         entries: entries,
         searchQuery: state.searchQuery,
         selectedCategoryId: state.selectedCategoryId,
         favoritesOnly: state.favoritesOnly,
       );
+      filteredCount = filteredEntries.length;
       final currentEntries =
           _buildPageEntries(filteredEntries, page: 0, pageSize: state.pageSize);
+      currentPageCount = currentEntries.length;
 
       state = state.copyWith(
         entries: entries,
@@ -259,6 +319,14 @@ class VibeLibraryNotifier extends _$VibeLibraryNotifier {
         isInitializing: false,
       );
     }
+    span.finish(
+      details: {
+        'entries': entryCount,
+        'filtered': filteredCount,
+        'currentPageEntries': currentPageCount,
+        'categories': categoryCount,
+      },
+    );
   }
 
   /// 加载指定页面
