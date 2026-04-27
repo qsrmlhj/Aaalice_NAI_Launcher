@@ -108,6 +108,18 @@ class PromptAssistantConfigNotifier
         translateModel: 'openai-large',
       );
     }
+    if (routing.reverseProviderId == providerId) {
+      routing = routing.copyWith(
+        reverseProviderId: 'pollinations',
+        reverseModel: 'openai-large',
+      );
+    }
+    if (routing.characterReplaceProviderId == providerId) {
+      routing = routing.copyWith(
+        characterReplaceProviderId: 'pollinations',
+        characterReplaceModel: 'openai-large',
+      );
+    }
     final keys = Map<String, bool>.from(state.providerHasApiKey)
       ..remove(providerId);
     state = state.copyWith(
@@ -166,6 +178,10 @@ class PromptAssistantConfigNotifier
   }
 
   Future<void> removeRule(String ruleId) async {
+    final matchingRules = state.rules.where((r) => r.id == ruleId);
+    if (matchingRules.isNotEmpty && matchingRules.first.isDefault) {
+      return;
+    }
     state = state.copyWith(
       rules: state.rules.where((r) => r.id != ruleId).toList(),
     );

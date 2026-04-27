@@ -73,7 +73,7 @@ class PromptAssistantApiClient {
     required String sessionId,
     required ProviderConfig provider,
     required String model,
-    required List<Map<String, String>> messages,
+    required List<Map<String, dynamic>> messages,
     required double temperature,
     required double topP,
     required int maxTokens,

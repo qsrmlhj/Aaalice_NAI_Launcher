@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../widgets/common/app_toast.dart';
+import '../../../data/models/character/character_prompt.dart';
+import '../../providers/character_prompt_provider.dart';
 import '../providers/prompt_assistant_config_provider.dart';
 import '../providers/prompt_assistant_history_provider.dart';
 import '../providers/prompt_assistant_state_provider.dart';
@@ -79,6 +81,71 @@ class _PromptAssistantOverlayState extends ConsumerState<PromptAssistantOverlay>
         widget.controller.text,
         sessionId: widget.sessionId,
       ),
+    );
+  }
+
+  Future<void> _runCharacterReplace() async {
+    final character = await _selectCharacterForReplacement();
+    if (character == null) {
+      return;
+    }
+
+    await _runAction(
+      '角色替换中',
+      (service) => service.replaceCharacterPrompt(
+        widget.controller.text,
+        sessionId: widget.sessionId,
+        characterName: character.name,
+        characterPrompt: character.prompt,
+      ),
+    );
+  }
+
+  Future<CharacterPrompt?> _selectCharacterForReplacement() async {
+    final characters = ref
+        .read(characterPromptNotifierProvider)
+        .characters
+        .where((c) => c.enabled && c.prompt.trim().isNotEmpty)
+        .toList();
+    if (characters.isEmpty) {
+      if (mounted) AppToast.warning(context, '请先在角色词库中添加有效角色');
+      return null;
+    }
+    if (characters.length == 1) {
+      return characters.first;
+    }
+    return showDialog<CharacterPrompt>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('选择替换目标角色'),
+          content: SizedBox(
+            width: 360,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: characters.length,
+              itemBuilder: (context, index) {
+                final character = characters[index];
+                return ListTile(
+                  title: Text(character.name),
+                  subtitle: Text(
+                    character.prompt,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () => Navigator.of(context).pop(character),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -408,6 +475,11 @@ class _PromptAssistantOverlayState extends ConsumerState<PromptAssistantOverlay>
                     icon: Icons.auto_fix_high,
                     tooltip: '优化',
                     onPressed: isProcessing ? null : _runOptimize,
+                  ),
+                  _miniButton(
+                    icon: Icons.manage_accounts_rounded,
+                    tooltip: '角色替换',
+                    onPressed: isProcessing ? null : _runCharacterReplace,
                   ),
                   _miniButton(
                     icon: isProcessing ? Icons.stop_circle : Icons.more_horiz,

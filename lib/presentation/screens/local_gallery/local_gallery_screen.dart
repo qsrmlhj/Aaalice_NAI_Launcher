@@ -32,6 +32,7 @@ import '../../providers/gallery_folder_provider.dart';
 import '../../providers/image_generation_provider.dart';
 import '../../providers/local_gallery_provider.dart';
 import '../../providers/gallery_scan_progress_provider.dart';
+import '../../providers/reverse_prompt_provider.dart';
 import '../../router/app_router.dart';
 import '../../services/image_workflow_launcher.dart';
 import '../../providers/selection_mode_provider.dart';
@@ -1043,6 +1044,27 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
     }
   }
 
+  Future<void> _sendToReversePrompt(LocalImageRecord record) async {
+    try {
+      final file = File(record.path);
+      if (!await file.exists()) {
+        if (mounted) AppToast.info(context, '图片文件不存在');
+        return;
+      }
+
+      await ref
+          .read(reversePromptProvider.notifier)
+          .addImage(await file.readAsBytes(), name: path.basename(record.path));
+
+      if (mounted) {
+        context.go(AppRoutes.home);
+        AppToast.success(context, '图片已发送到反推模块');
+      }
+    } catch (e) {
+      if (mounted) AppToast.error(context, '发送失败: $e');
+    }
+  }
+
   Future<void> _showSendDestinationDialog(LocalImageRecord record) async {
     final destination = await ImageSendDestinationDialog.show(context, record);
     if (destination == null || !mounted) return;
@@ -1050,6 +1072,8 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
     switch (destination) {
       case SendDestination.img2img:
         await _sendToImg2Img(record);
+      case SendDestination.reversePrompt:
+        await _sendToReversePrompt(record);
       case SendDestination.vibeTransfer:
         await _sendToVibeTransfer(record);
     }

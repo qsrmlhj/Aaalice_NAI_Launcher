@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image/image.dart' as img;
 
 import '../../../core/utils/app_logger.dart';
 import '../../../core/utils/focused_inpaint_utils.dart';
@@ -14,6 +15,7 @@ import '../../widgets/common/app_toast.dart';
 import 'core/canvas_controller.dart';
 import 'core/editor_state.dart';
 import 'core/focused_selection_state.dart';
+import 'core/history_manager.dart';
 import 'layers/layer.dart';
 import 'painters/focused_overlay_painter.dart';
 import 'tools/tool_base.dart';
@@ -29,6 +31,17 @@ import '../../widgets/common/themed_divider.dart';
 enum ImageEditorMode {
   edit,
   inpaint,
+}
+
+enum _EditorEffectType {
+  brightness,
+  contrast,
+  saturation,
+  grayscale,
+  invert,
+  sepia,
+  blur,
+  sharpen,
 }
 
 /// 图像编辑器返回结果
@@ -408,6 +421,12 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
               onPressed: _loadMask,
               tooltip: '加载蒙版',
             ),
+          if (!_isInpaintMode)
+            IconButton(
+              icon: const Icon(Icons.tune_rounded),
+              onPressed: _showEffectsDialog,
+              tooltip: 'Effects',
+            ),
           // 导出按钮
           IconButton(
             icon: const Icon(Icons.check),
@@ -464,6 +483,13 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
           Text(widget.title, style: theme.textTheme.titleSmall),
 
           const Spacer(),
+
+          if (!_isInpaintMode)
+            TextButton.icon(
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: const Text('Effects'),
+              onPressed: _showEffectsDialog,
+            ),
 
           // 画布尺寸按钮（使用细粒度监听）
           TextButton.icon(
@@ -756,6 +782,240 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _showEffectsDialog() async {
+    var effectType = _EditorEffectType.brightness;
+    var intensity = 0.25;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('本地后处理 / Effects'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<_EditorEffectType>(
+                      initialValue: effectType,
+                      items: _EditorEffectType.values
+                          .map(
+                            (type) => DropdownMenuItem(
+                              value: type,
+                              child: Text(_effectLabel(type)),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setState(() {
+                          effectType = value;
+                          intensity = _defaultEffectIntensity(value);
+                        });
+                      },
+                      decoration: const InputDecoration(labelText: '效果'),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Text('强度 ${intensity.toStringAsFixed(2)}'),
+                        Expanded(
+                          child: Slider(
+                            value: intensity,
+                            min: _effectMin(effectType),
+                            max: _effectMax(effectType),
+                            divisions: 20,
+                            onChanged: (value) =>
+                                setState(() => intensity = value),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Text(
+                      '效果会应用到当前活动图层，并写入撤销历史。若需要处理整张图，请先合并或选择对应底图图层。',
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('应用'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await _applyEffect(effectType, intensity);
+    }
+  }
+
+  Future<void> _applyEffect(
+    _EditorEffectType effectType,
+    double intensity,
+  ) async {
+    final layer = _state.layerManager.activeLayer;
+    if (layer == null || layer.locked || !layer.hasContent) {
+      AppToast.warning(context, '请选择一个非锁定且有内容的图层');
+      return;
+    }
+
+    try {
+      final rendered = await _renderLayerToImage(layer);
+      final raw = await rendered.toByteData(format: ui.ImageByteFormat.png);
+      rendered.dispose();
+      if (!mounted) return;
+      if (raw == null) {
+        AppToast.error(context, '无法读取当前图层');
+        return;
+      }
+
+      final source = img.decodePng(raw.buffer.asUint8List());
+      if (source == null) {
+        AppToast.error(context, '无法解码当前图层');
+        return;
+      }
+
+      final effected = _applyImageEffect(source, effectType, intensity);
+      final bytes = Uint8List.fromList(img.encodePng(effected));
+      final newImage = await _decodeUiImage(bytes);
+      if (!mounted) return;
+      _state.historyManager.execute(
+        ReplaceLayerImageAction(
+          layerId: layer.id,
+          newImageBytes: bytes,
+          newImage: newImage,
+          actionDescription: _effectLabel(effectType),
+        ),
+        _state,
+      );
+      _state.layerManager.invalidateSnapshot();
+      setState(() {});
+      AppToast.success(context, '已应用 ${_effectLabel(effectType)}');
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.error(context, '应用效果失败: $e');
+    }
+  }
+
+  Future<ui.Image> _renderLayerToImage(dynamic layer) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    layer.render(canvas, _state.canvasSize);
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(
+      _state.canvasSize.width.toInt(),
+      _state.canvasSize.height.toInt(),
+    );
+    picture.dispose();
+    return image;
+  }
+
+  Future<ui.Image> _decodeUiImage(Uint8List bytes) async {
+    final codec = await ui.instantiateImageCodec(bytes);
+    try {
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    } finally {
+      codec.dispose();
+    }
+  }
+
+  img.Image _applyImageEffect(
+    img.Image source,
+    _EditorEffectType effectType,
+    double intensity,
+  ) {
+    final work = img.Image.from(source);
+    switch (effectType) {
+      case _EditorEffectType.brightness:
+        return img.adjustColor(
+          work,
+          brightness: (1.0 + intensity).clamp(0.0, 2.0),
+        );
+      case _EditorEffectType.contrast:
+        return img.adjustColor(
+          work,
+          contrast: (1.0 + intensity).clamp(0.0, 2.0),
+        );
+      case _EditorEffectType.saturation:
+        return img.adjustColor(
+          work,
+          saturation: (1.0 + intensity).clamp(0.0, 2.0),
+        );
+      case _EditorEffectType.grayscale:
+        return img.grayscale(work);
+      case _EditorEffectType.invert:
+        return img.invert(work);
+      case _EditorEffectType.sepia:
+        return img.sepia(work, amount: intensity.clamp(0.0, 1.0));
+      case _EditorEffectType.blur:
+        return img.gaussianBlur(work, radius: (intensity * 12).round());
+      case _EditorEffectType.sharpen:
+        return img.convolution(
+          work,
+          filter: const [0, -1, 0, -1, 5, -1, 0, -1, 0],
+          amount: intensity.clamp(0.0, 1.0),
+        );
+    }
+  }
+
+  String _effectLabel(_EditorEffectType type) {
+    return switch (type) {
+      _EditorEffectType.brightness => '亮度',
+      _EditorEffectType.contrast => '对比度',
+      _EditorEffectType.saturation => '饱和度',
+      _EditorEffectType.grayscale => '灰度',
+      _EditorEffectType.invert => '反相',
+      _EditorEffectType.sepia => '复古棕褐',
+      _EditorEffectType.blur => '高斯模糊',
+      _EditorEffectType.sharpen => '锐化',
+    };
+  }
+
+  double _defaultEffectIntensity(_EditorEffectType type) {
+    return switch (type) {
+      _EditorEffectType.brightness => 0.25,
+      _EditorEffectType.contrast => 0.25,
+      _EditorEffectType.saturation => 0.25,
+      _EditorEffectType.grayscale => 1.0,
+      _EditorEffectType.invert => 1.0,
+      _EditorEffectType.sepia => 0.75,
+      _EditorEffectType.blur => 0.25,
+      _EditorEffectType.sharpen => 0.65,
+    };
+  }
+
+  double _effectMin(_EditorEffectType type) {
+    return switch (type) {
+      _EditorEffectType.brightness => -0.8,
+      _EditorEffectType.contrast => -0.8,
+      _EditorEffectType.saturation => -1.0,
+      _ => 0.0,
+    };
+  }
+
+  double _effectMax(_EditorEffectType type) {
+    return switch (type) {
+      _EditorEffectType.grayscale => 1.0,
+      _EditorEffectType.invert => 1.0,
+      _EditorEffectType.sepia => 1.0,
+      _EditorEffectType.sharpen => 1.0,
+      _EditorEffectType.blur => 1.0,
+      _ => 1.0,
+    };
   }
 
   Widget _buildShortcutSection(String title, List<(String, String)> shortcuts) {
@@ -1201,8 +1461,8 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
         Positioned.fill(
           child: EditorCanvas(
             state: _state,
-            suppressSelectionOverlay: _focusedSelectionState
-                .shouldSuppressSelectionOverlay(
+            suppressSelectionOverlay:
+                _focusedSelectionState.shouldSuppressSelectionOverlay(
               focusedEnabled: _isInpaintMode && _focusedInpaintEnabled,
               currentToolId: _state.currentTool?.id,
               previewPath: _state.previewPath,
@@ -1393,7 +1653,8 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     if (_state.currentTool?.id != 'rect_selection') {
       return;
     }
-    final consumed = _focusedSelectionState.captureSelection(_state.selectionPath);
+    final consumed =
+        _focusedSelectionState.captureSelection(_state.selectionPath);
     if (!consumed) {
       return;
     }

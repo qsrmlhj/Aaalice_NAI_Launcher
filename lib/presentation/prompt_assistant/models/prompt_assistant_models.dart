@@ -1,6 +1,21 @@
 import 'dart:convert';
 
-enum AssistantTaskType { llm, translate }
+enum AssistantTaskType { llm, translate, reverse, characterReplace }
+
+extension AssistantTaskTypeLabel on AssistantTaskType {
+  String get label {
+    switch (this) {
+      case AssistantTaskType.llm:
+        return '优化';
+      case AssistantTaskType.translate:
+        return '翻译';
+      case AssistantTaskType.reverse:
+        return '反推';
+      case AssistantTaskType.characterReplace:
+        return '角色替换';
+    }
+  }
+}
 
 enum ProviderType { pollinations, openaiCompatible, ollama }
 
@@ -139,12 +154,20 @@ class TaskRoutingConfig {
   final String llmModel;
   final String translateProviderId;
   final String translateModel;
+  final String reverseProviderId;
+  final String reverseModel;
+  final String characterReplaceProviderId;
+  final String characterReplaceModel;
 
   const TaskRoutingConfig({
     required this.llmProviderId,
     required this.llmModel,
     required this.translateProviderId,
     required this.translateModel,
+    required this.reverseProviderId,
+    required this.reverseModel,
+    required this.characterReplaceProviderId,
+    required this.characterReplaceModel,
   });
 
   TaskRoutingConfig copyWith({
@@ -152,13 +175,72 @@ class TaskRoutingConfig {
     String? llmModel,
     String? translateProviderId,
     String? translateModel,
+    String? reverseProviderId,
+    String? reverseModel,
+    String? characterReplaceProviderId,
+    String? characterReplaceModel,
   }) {
     return TaskRoutingConfig(
       llmProviderId: llmProviderId ?? this.llmProviderId,
       llmModel: llmModel ?? this.llmModel,
       translateProviderId: translateProviderId ?? this.translateProviderId,
       translateModel: translateModel ?? this.translateModel,
+      reverseProviderId: reverseProviderId ?? this.reverseProviderId,
+      reverseModel: reverseModel ?? this.reverseModel,
+      characterReplaceProviderId:
+          characterReplaceProviderId ?? this.characterReplaceProviderId,
+      characterReplaceModel:
+          characterReplaceModel ?? this.characterReplaceModel,
     );
+  }
+
+  String providerIdFor(AssistantTaskType taskType) {
+    switch (taskType) {
+      case AssistantTaskType.llm:
+        return llmProviderId;
+      case AssistantTaskType.translate:
+        return translateProviderId;
+      case AssistantTaskType.reverse:
+        return reverseProviderId;
+      case AssistantTaskType.characterReplace:
+        return characterReplaceProviderId;
+    }
+  }
+
+  String modelFor(AssistantTaskType taskType) {
+    switch (taskType) {
+      case AssistantTaskType.llm:
+        return llmModel;
+      case AssistantTaskType.translate:
+        return translateModel;
+      case AssistantTaskType.reverse:
+        return reverseModel;
+      case AssistantTaskType.characterReplace:
+        return characterReplaceModel;
+    }
+  }
+
+  TaskRoutingConfig copyWithTask({
+    required AssistantTaskType taskType,
+    required String providerId,
+    required String model,
+  }) {
+    switch (taskType) {
+      case AssistantTaskType.llm:
+        return copyWith(llmProviderId: providerId, llmModel: model);
+      case AssistantTaskType.translate:
+        return copyWith(
+          translateProviderId: providerId,
+          translateModel: model,
+        );
+      case AssistantTaskType.reverse:
+        return copyWith(reverseProviderId: providerId, reverseModel: model);
+      case AssistantTaskType.characterReplace:
+        return copyWith(
+          characterReplaceProviderId: providerId,
+          characterReplaceModel: model,
+        );
+    }
   }
 
   Map<String, dynamic> toJson() => {
@@ -166,14 +248,32 @@ class TaskRoutingConfig {
         'llmModel': llmModel,
         'translateProviderId': translateProviderId,
         'translateModel': translateModel,
+        'reverseProviderId': reverseProviderId,
+        'reverseModel': reverseModel,
+        'characterReplaceProviderId': characterReplaceProviderId,
+        'characterReplaceModel': characterReplaceModel,
       };
 
   factory TaskRoutingConfig.fromJson(Map<String, dynamic> json) {
     return TaskRoutingConfig(
-      llmProviderId: json['llmProviderId'] as String,
-      llmModel: json['llmModel'] as String,
-      translateProviderId: json['translateProviderId'] as String,
-      translateModel: json['translateModel'] as String,
+      llmProviderId: json['llmProviderId'] as String? ?? 'pollinations',
+      llmModel: json['llmModel'] as String? ?? 'openai-large',
+      translateProviderId:
+          json['translateProviderId'] as String? ?? 'pollinations',
+      translateModel: json['translateModel'] as String? ?? 'openai-large',
+      reverseProviderId: json['reverseProviderId'] as String? ??
+          json['llmProviderId'] as String? ??
+          'pollinations',
+      reverseModel: json['reverseModel'] as String? ??
+          json['llmModel'] as String? ??
+          'openai-large',
+      characterReplaceProviderId:
+          json['characterReplaceProviderId'] as String? ??
+              json['llmProviderId'] as String? ??
+              'pollinations',
+      characterReplaceModel: json['characterReplaceModel'] as String? ??
+          json['llmModel'] as String? ??
+          'openai-large',
     );
   }
 }
@@ -326,12 +426,30 @@ class PromptAssistantConfigState {
           forTask: AssistantTaskType.translate,
           isDefault: true,
         ),
+        ModelConfig(
+          providerId: 'pollinations',
+          name: 'openai-large',
+          displayName: 'openai-large',
+          forTask: AssistantTaskType.reverse,
+          isDefault: true,
+        ),
+        ModelConfig(
+          providerId: 'pollinations',
+          name: 'openai-large',
+          displayName: 'openai-large',
+          forTask: AssistantTaskType.characterReplace,
+          isDefault: true,
+        ),
       ],
       routing: TaskRoutingConfig(
         llmProviderId: 'pollinations',
         llmModel: 'openai-large',
         translateProviderId: 'pollinations',
         translateModel: 'openai-large',
+        reverseProviderId: 'pollinations',
+        reverseModel: 'openai-large',
+        characterReplaceProviderId: 'pollinations',
+        characterReplaceModel: 'openai-large',
       ),
       rules: [
         PromptRuleTemplate(
@@ -346,6 +464,22 @@ class PromptAssistantConfigState {
           name: '默认翻译规则',
           taskType: AssistantTaskType.translate,
           content: '你是翻译助手。识别原文语言，自动在中英间互译，仅返回译文，不要解释。',
+          isDefault: true,
+        ),
+        PromptRuleTemplate(
+          id: 'reverse_default',
+          name: '默认反推规则',
+          taskType: AssistantTaskType.reverse,
+          content:
+              '你是图像反推助手。根据图片和可选 tagger 结果，输出适合 NovelAI 的英文逗号分隔提示词。保留主体、角色、画风、服装、动作、构图、光影和背景，不要解释。',
+          isDefault: true,
+        ),
+        PromptRuleTemplate(
+          id: 'character_replace_default',
+          name: '默认角色替换规则',
+          taskType: AssistantTaskType.characterReplace,
+          content:
+              '你是角色替换助手。将输入提示词中的原角色身份、发型、服装、外观替换为指定角色；保留动作、构图、背景、画风、镜头和质量词。仅输出替换后的单行提示词。',
           isDefault: true,
         ),
       ],
@@ -400,11 +534,12 @@ class PromptAssistantConfigState {
         : defaults.providers;
 
     final modelsRaw = json['models'];
-    final models = modelsRaw is List && modelsRaw.isNotEmpty
+    final decodedModels = modelsRaw is List && modelsRaw.isNotEmpty
         ? modelsRaw
             .map((e) => ModelConfig.fromJson(e as Map<String, dynamic>))
             .toList()
         : defaults.models;
+    final models = _mergeDefaultModels(decodedModels, defaults.models);
 
     var routing = TaskRoutingConfig.fromJson(
       (json['routing'] as Map?)?.cast<String, dynamic>() ??
@@ -422,6 +557,26 @@ class PromptAssistantConfigState {
         translateModel: defaults.routing.translateModel,
       );
     }
+    if (!providers.any((p) => p.id == routing.reverseProviderId)) {
+      routing = routing.copyWith(
+        reverseProviderId: defaults.routing.reverseProviderId,
+        reverseModel: defaults.routing.reverseModel,
+      );
+    }
+    if (!providers.any((p) => p.id == routing.characterReplaceProviderId)) {
+      routing = routing.copyWith(
+        characterReplaceProviderId: defaults.routing.characterReplaceProviderId,
+        characterReplaceModel: defaults.routing.characterReplaceModel,
+      );
+    }
+
+    final rulesRaw = json['rules'];
+    final decodedRules = rulesRaw is List && rulesRaw.isNotEmpty
+        ? rulesRaw
+            .map((e) => PromptRuleTemplate.fromJson(e as Map<String, dynamic>))
+            .toList()
+        : defaults.rules;
+    final rules = _mergeDefaultRules(decodedRules, defaults.rules);
 
     return PromptAssistantConfigState(
       enabled: json['enabled'] as bool? ?? true,
@@ -430,10 +585,44 @@ class PromptAssistantConfigState {
       providers: providers,
       models: models,
       routing: routing,
-      rules: ((json['rules'] as List?) ?? const [])
-          .map((e) => PromptRuleTemplate.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      rules: rules,
       providerHasApiKey: const {},
     );
+  }
+
+  static List<ModelConfig> _mergeDefaultModels(
+    List<ModelConfig> models,
+    List<ModelConfig> defaults,
+  ) {
+    final result = [...models];
+    for (final fallback in defaults) {
+      final exists = result.any(
+        (m) =>
+            m.providerId == fallback.providerId &&
+            m.name == fallback.name &&
+            m.forTask == fallback.forTask,
+      );
+      if (!exists) {
+        result.add(fallback);
+      }
+    }
+    return result;
+  }
+
+  static List<PromptRuleTemplate> _mergeDefaultRules(
+    List<PromptRuleTemplate> rules,
+    List<PromptRuleTemplate> defaults,
+  ) {
+    final result = [...rules];
+    for (final fallback in defaults) {
+      final index = result.indexWhere((r) => r.id == fallback.id);
+      if (index >= 0) {
+        result[index] = result[index].copyWith(isDefault: true);
+      } else {
+        result.add(fallback);
+      }
+    }
+    result.sort((a, b) => a.order.compareTo(b.order));
+    return result;
   }
 }

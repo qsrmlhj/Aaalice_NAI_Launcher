@@ -13,6 +13,8 @@ import '../../../../core/utils/focused_inpaint_utils.dart';
 import '../../../../core/utils/localization_extension.dart';
 import '../../../../data/datasources/remote/nai_image_enhancement_api_service.dart';
 import '../../../../data/models/image/image_params.dart';
+import '../../../../data/services/local_onnx_model_service.dart';
+import '../../../../data/services/local_onnx_upscale_service.dart';
 import '../../../providers/comfyui/comfyui_provider.dart';
 import '../../../providers/generation/generation_params_selectors.dart';
 import '../../../providers/image_generation_provider.dart';
@@ -40,6 +42,7 @@ class Img2ImgPanel extends ConsumerStatefulWidget {
 
 class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
   bool _naiUpscaling = false;
+  bool _localOnnxUpscaling = false;
 
   @override
   Widget build(BuildContext context) {
@@ -607,6 +610,7 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     final upscale = workflow.upscale;
     final isNai = upscale.backend == UpscaleBackend.novelai;
     final isComfy = upscale.backend == UpscaleBackend.comfyui;
+    final isLocalOnnx = upscale.backend == UpscaleBackend.localOnnx;
 
     final availableModels = ref.watch(comfyUISeedvr2ModelsProvider);
     final resolvedComfyModel = selectPreferredUpscaleModel(
@@ -625,6 +629,8 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     final bool canStart;
     if (isNai) {
       canStart = hasSourceImage && !_naiUpscaling;
+    } else if (isLocalOnnx) {
+      canStart = hasSourceImage && !_localOnnxUpscaling;
     } else {
       canStart = comfyEnabled && hasSourceImage && !taskState.isRunning;
     }
@@ -660,6 +666,11 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
                 icon: const Icon(Icons.computer, size: 16),
                 enabled: comfyEnabled,
               ),
+              const ButtonSegment(
+                value: UpscaleBackend.localOnnx,
+                label: Text('本地 ONNX'),
+                icon: Icon(Icons.memory_rounded, size: 16),
+              ),
             ],
             selected: {upscale.backend},
             onSelectionChanged: (v) => controller.updateUpscaleBackend(v.first),
@@ -677,6 +688,65 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
                 color: Colors.white70,
               ),
             ),
+          ] else if (isLocalOnnx) ...[
+            Text(
+              '本地轻量放大使用模型文件夹列表选择模型，倍率由 Lanczos3 缩放实现。',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: Colors.white70,
+              ),
+            ),
+            const SizedBox(height: 8),
+            FutureBuilder<List<LocalOnnxModelDescriptor>>(
+              future:
+                  ref.read(localOnnxModelServiceProvider).scanUpscaleModels(),
+              builder: (context, snapshot) {
+                final models =
+                    snapshot.data ?? const <LocalOnnxModelDescriptor>[];
+                final selected =
+                    models.any((m) => m.path == upscale.localOnnxModel)
+                        ? upscale.localOnnxModel
+                        : (models.isNotEmpty ? models.first.path : null);
+                if (selected != null && selected != upscale.localOnnxModel) {
+                  Future.microtask(
+                    () => controller.updateUpscaleLocalOnnxModel(selected),
+                  );
+                }
+                return DropdownButtonFormField<String>(
+                  initialValue: selected,
+                  isExpanded: true,
+                  items: models
+                      .map(
+                        (m) => DropdownMenuItem(
+                          value: m.path,
+                          child: Text(
+                            m.name,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) {
+                      controller.updateUpscaleLocalOnnxModel(v);
+                    }
+                  },
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    labelText: '本地 ONNX 模型',
+                    hintText: '请在设置中配置模型文件夹',
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            _buildScaleSlider(theme, upscale, controller),
+            if (_localOnnxUpscaling) ...[
+              const SizedBox(height: 8),
+              const LinearProgressIndicator(),
+            ],
           ] else ...[
             if (!comfyEnabled)
               Text(
@@ -848,6 +918,8 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
 
     if (wf.upscale.backend == UpscaleBackend.novelai) {
       await _runNaiUpscale(params, src);
+    } else if (wf.upscale.backend == UpscaleBackend.localOnnx) {
+      await _runLocalOnnxUpscale(params, src, wf);
     } else {
       await _runComfySeedvr2Upscale(params, src, wf);
     }
@@ -924,6 +996,56 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
 
     if (mounted) {
       AppToast.success(context, '超分完成 ($outW×$outH)，已加入预览列表');
+    }
+  }
+
+  Future<void> _runLocalOnnxUpscale(
+    ImageParams params,
+    Uint8List src,
+    ImageWorkflowState wf,
+  ) async {
+    setState(() => _localOnnxUpscaling = true);
+    try {
+      final models =
+          await ref.read(localOnnxModelServiceProvider).scanUpscaleModels();
+      if (models.isEmpty) {
+        throw StateError('未找到本地 ONNX 放大模型，请先在设置中配置模型文件夹');
+      }
+      final selectedModel =
+          models.any((m) => m.path == wf.upscale.localOnnxModel)
+              ? wf.upscale.localOnnxModel
+              : models.first.path;
+      ref
+          .read(imageWorkflowControllerProvider.notifier)
+          .updateUpscaleLocalOnnxModel(selectedModel);
+
+      final result = await ref
+          .read(localOnnxUpscaleServiceProvider)
+          .upscaleLanczos(imageBytes: src, scale: wf.upscale.comfyScale);
+      if (!mounted) return;
+
+      final saveSettings = ref.read(imageSaveSettingsNotifierProvider);
+      await ref
+          .read(imageGenerationNotifierProvider.notifier)
+          .registerExternalImage(
+            result.bytes,
+            params: params,
+            width: result.width,
+            height: result.height,
+            saveToLocal: saveSettings.autoSave,
+            addToDisplay: true,
+          );
+
+      if (mounted) {
+        AppToast.success(
+          context,
+          '本地 Lanczos 超分完成 (${result.width}×${result.height})',
+        );
+      }
+    } catch (e) {
+      if (mounted) AppToast.error(context, e.toString());
+    } finally {
+      if (mounted) setState(() => _localOnnxUpscaling = false);
     }
   }
 

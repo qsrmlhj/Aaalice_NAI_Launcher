@@ -20,7 +20,7 @@ enum ImageWorkflowMode {
   upscale,
 }
 
-enum UpscaleBackend { comfyui, novelai }
+enum UpscaleBackend { comfyui, novelai, localOnnx }
 
 String selectPreferredUpscaleModel(
   Iterable<String> availableModels, {
@@ -58,6 +58,7 @@ class UpscaleWorkflowSettings {
     this.backend = defaultBackend,
     this.comfyScale = defaultComfyScale,
     this.comfyModel = defaultComfyModel,
+    this.localOnnxModel = '',
   });
 
   static const UpscaleBackend defaultBackend = UpscaleBackend.comfyui;
@@ -67,6 +68,7 @@ class UpscaleWorkflowSettings {
   final UpscaleBackend backend;
   final double comfyScale;
   final String comfyModel;
+  final String localOnnxModel;
 
   static const double minScale = 1.0;
   static const double maxScale = 2.0;
@@ -75,11 +77,13 @@ class UpscaleWorkflowSettings {
     UpscaleBackend? backend,
     double? comfyScale,
     String? comfyModel,
+    String? localOnnxModel,
   }) {
     return UpscaleWorkflowSettings(
       backend: backend ?? this.backend,
       comfyScale: comfyScale ?? this.comfyScale,
       comfyModel: comfyModel ?? this.comfyModel,
+      localOnnxModel: localOnnxModel ?? this.localOnnxModel,
     );
   }
 }
@@ -223,6 +227,11 @@ class ImageWorkflowController extends Notifier<ImageWorkflowState> {
         ) ??
         UpscaleWorkflowSettings.defaultComfyModel;
     final persistedBackend = _readPersistedUpscaleBackend();
+    final persistedLocalOnnxModel = _storage.getSetting<String>(
+          StorageKeys.localOnnxUpscaleModel,
+          defaultValue: '',
+        ) ??
+        '';
     final persistedEnhance = _readPersistedEnhanceSettings();
 
     return _buildDefaultState(
@@ -231,6 +240,7 @@ class ImageWorkflowController extends Notifier<ImageWorkflowState> {
         backend: persistedBackend,
         comfyScale: persistedScale,
         comfyModel: persistedModel,
+        localOnnxModel: persistedLocalOnnxModel,
       ),
     );
   }
@@ -315,6 +325,12 @@ class ImageWorkflowController extends Notifier<ImageWorkflowState> {
   void _persistUpscaleSettings(UpscaleWorkflowSettings settings) {
     unawaited(
       _storage.setSetting(StorageKeys.comfyuiUpscaleModel, settings.comfyModel),
+    );
+    unawaited(
+      _storage.setSetting(
+        StorageKeys.localOnnxUpscaleModel,
+        settings.localOnnxModel,
+      ),
     );
     unawaited(
       _storage.setSetting(StorageKeys.comfyuiUpscaleScale, settings.comfyScale),
@@ -512,6 +528,12 @@ class ImageWorkflowController extends Notifier<ImageWorkflowState> {
 
   void updateUpscaleComfyModel(String model) {
     final nextSettings = state.upscale.copyWith(comfyModel: model);
+    state = state.copyWith(upscale: nextSettings);
+    _persistUpscaleSettings(nextSettings);
+  }
+
+  void updateUpscaleLocalOnnxModel(String model) {
+    final nextSettings = state.upscale.copyWith(localOnnxModel: model);
     state = state.copyWith(upscale: nextSettings);
     _persistUpscaleSettings(nextSettings);
   }

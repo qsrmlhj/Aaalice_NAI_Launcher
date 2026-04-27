@@ -13,6 +13,7 @@ import '../../../widgets/common/themed_button.dart';
 import '../../../widgets/common/themed_slider.dart';
 import '../../../widgets/common/themed_divider.dart';
 import 'img2img_panel.dart';
+import 'reverse_prompt_panel.dart';
 import 'unified_reference_panel.dart';
 import 'precise_reference_panel.dart';
 import 'prompt_input.dart';
@@ -391,6 +392,11 @@ class _ParameterPanelState extends ConsumerState<ParameterPanel> {
         const SizedBox(height: 16),
 
         // ==================== 新功能面板 ====================
+
+        // 反推面板
+        const ReversePromptPanel(),
+
+        const SizedBox(height: 8),
 
         // 图生图面板
         const Img2ImgPanel(),

@@ -1,8 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:nai_launcher/app.dart';
 import 'package:nai_launcher/core/comfyui/comfyui_url_utils.dart';
+import 'package:nai_launcher/data/services/local_onnx_upscale_service.dart';
+import 'package:nai_launcher/presentation/prompt_assistant/models/prompt_assistant_models.dart';
 
 /// 简单的 Widget 测试示例
 ///
@@ -110,6 +115,141 @@ void main() {
         proxiedUri.toString(),
         'wss://example.test/comfyui/ws?clientId=client-1',
       );
+    });
+  });
+
+  group('Prompt assistant defaults', () {
+    test('contains immutable defaults for all assistant task types', () {
+      final defaults = PromptAssistantConfigState.defaults();
+
+      for (final taskType in AssistantTaskType.values) {
+        expect(
+          defaults.models.any(
+            (model) => model.forTask == taskType && model.isDefault,
+          ),
+          isTrue,
+        );
+        expect(
+          defaults.rules.any(
+            (rule) => rule.taskType == taskType && rule.isDefault,
+          ),
+          isTrue,
+        );
+        expect(defaults.routing.providerIdFor(taskType), isNotEmpty);
+        expect(defaults.routing.modelFor(taskType), isNotEmpty);
+      }
+    });
+
+    test(
+      'hydrates reverse and character replacement routing from old config',
+      () {
+        final oldConfig = PromptAssistantConfigState.defaults()
+            .copyWith(
+              models: PromptAssistantConfigState.defaults()
+                  .models
+                  .where(
+                    (model) =>
+                        model.forTask == AssistantTaskType.llm ||
+                        model.forTask == AssistantTaskType.translate,
+                  )
+                  .toList(),
+              rules: PromptAssistantConfigState.defaults()
+                  .rules
+                  .where(
+                    (rule) =>
+                        rule.taskType == AssistantTaskType.llm ||
+                        rule.taskType == AssistantTaskType.translate,
+                  )
+                  .toList(),
+            )
+            .toJson()
+          ..['routing'] = const TaskRoutingConfig(
+            llmProviderId: 'pollinations',
+            llmModel: 'openai-large',
+            translateProviderId: 'pollinations',
+            translateModel: 'openai-large',
+            reverseProviderId: '',
+            reverseModel: '',
+            characterReplaceProviderId: '',
+            characterReplaceModel: '',
+          ).toJson();
+
+        final decoded = PromptAssistantConfigState.decode(
+          PromptAssistantConfigState(
+            enabled: oldConfig['enabled'] as bool,
+            desktopOverlayEnabled: oldConfig['desktopOverlayEnabled'] as bool,
+            streamOutput: oldConfig['streamOutput'] as bool,
+            providers: (oldConfig['providers'] as List)
+                .cast<Map<String, dynamic>>()
+                .map(ProviderConfig.fromJson)
+                .toList(),
+            models: (oldConfig['models'] as List)
+                .cast<Map<String, dynamic>>()
+                .map(ModelConfig.fromJson)
+                .toList(),
+            routing: TaskRoutingConfig.fromJson(
+              (oldConfig['routing'] as Map).cast<String, dynamic>(),
+            ),
+            rules: (oldConfig['rules'] as List)
+                .cast<Map<String, dynamic>>()
+                .map(PromptRuleTemplate.fromJson)
+                .toList(),
+            providerHasApiKey: const {},
+          ).encode(),
+        );
+
+        expect(
+          decoded.models.any(
+            (model) => model.forTask == AssistantTaskType.reverse,
+          ),
+          isTrue,
+        );
+        expect(
+          decoded.models.any(
+            (model) => model.forTask == AssistantTaskType.characterReplace,
+          ),
+          isTrue,
+        );
+        expect(
+          decoded.rules.any(
+            (rule) => rule.taskType == AssistantTaskType.reverse,
+          ),
+          isTrue,
+        );
+        expect(
+          decoded.rules.any(
+            (rule) => rule.taskType == AssistantTaskType.characterReplace,
+          ),
+          isTrue,
+        );
+        expect(
+          decoded.routing.providerIdFor(AssistantTaskType.reverse),
+          isNotEmpty,
+        );
+        expect(
+          decoded.routing.providerIdFor(AssistantTaskType.characterReplace),
+          isNotEmpty,
+        );
+      },
+    );
+  });
+
+  group('Local ONNX upscale', () {
+    test('uses Lanczos scaling dimensions for local image upscale', () async {
+      final source = img.Image(width: 2, height: 3);
+      img.fill(source, color: img.ColorRgb8(24, 48, 96));
+      const service = LocalOnnxUpscaleService();
+
+      final result = await service.upscaleLanczos(
+        imageBytes: Uint8List.fromList(img.encodePng(source)),
+        scale: 2,
+      );
+      final decoded = img.decodePng(result.bytes);
+
+      expect(result.width, 4);
+      expect(result.height, 6);
+      expect(decoded?.width, 4);
+      expect(decoded?.height, 6);
     });
   });
 }

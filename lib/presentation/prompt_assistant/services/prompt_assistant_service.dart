@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 
@@ -78,20 +81,60 @@ class PromptAssistantService {
     );
   }
 
+  Stream<StreamingChunk> reverseImagePrompt(
+    Uint8List imageBytes, {
+    required String sessionId,
+    String? taggerPrompt,
+  }) async* {
+    final text = StringBuffer(
+      '请反推这张图片，输出 NovelAI 可直接使用的英文逗号分隔提示词。',
+    );
+    final trimmedTags = taggerPrompt?.trim();
+    if (trimmedTags != null && trimmedTags.isNotEmpty) {
+      text
+        ..write('\n\n本地 ONNX tagger 初步结果如下，请结合图片判断取舍：\n')
+        ..write(trimmedTags);
+    }
+
+    yield* _runTask(
+      sessionId: sessionId,
+      taskType: AssistantTaskType.reverse,
+      userContent: [
+        {'type': 'text', 'text': text.toString()},
+        {
+          'type': 'image_url',
+          'image_url': {'url': _imageDataUri(imageBytes)},
+        },
+      ],
+      userInstruction: '请严格输出单行英文提示词，不要 Markdown，不要解释。优先保留可见元素，避免编造不可见角色信息。',
+    );
+  }
+
+  Stream<StreamingChunk> replaceCharacterPrompt(
+    String input, {
+    required String sessionId,
+    required String characterName,
+    required String characterPrompt,
+  }) async* {
+    yield* _runTask(
+      sessionId: sessionId,
+      taskType: AssistantTaskType.characterReplace,
+      userContent:
+          '目标角色名称：$characterName\n目标角色提示词：$characterPrompt\n\n待替换提示词：\n$input',
+      userInstruction: '请只替换角色身份和角色外观相关部分，保留动作、构图、场景、画风、镜头、质量词和负面约束之外的上下文。',
+    );
+  }
+
   Stream<StreamingChunk> _runTask({
     required String sessionId,
     required AssistantTaskType taskType,
-    required String userContent,
+    required Object userContent,
     required String userInstruction,
   }) async* {
     final config = _ref.read(promptAssistantConfigProvider);
 
-    final routingProviderId = taskType == AssistantTaskType.llm
-        ? config.routing.llmProviderId
-        : config.routing.translateProviderId;
-    final routingModel = taskType == AssistantTaskType.llm
-        ? config.routing.llmModel
-        : config.routing.translateModel;
+    final routingProviderId = config.routing.providerIdFor(taskType);
+    final routingModel = config.routing.modelFor(taskType);
 
     final provider = config.providers.firstWhere(
       (p) => p.id == routingProviderId && p.enabled,
@@ -132,7 +175,7 @@ class PromptAssistantService {
       userInstruction,
     ].join('\n\n');
 
-    final messages = <Map<String, String>>[
+    final messages = <Map<String, dynamic>>[
       {'role': 'system', 'content': systemPrompt},
       {'role': 'user', 'content': userContent},
     ];
@@ -148,5 +191,38 @@ class PromptAssistantService {
       advancedParams: provider.advancedParams,
       apiKey: apiKey,
     );
+  }
+
+  String _imageDataUri(Uint8List imageBytes) {
+    final mime = _detectImageMime(imageBytes);
+    return 'data:$mime;base64,${base64Encode(imageBytes)}';
+  }
+
+  String _detectImageMime(Uint8List bytes) {
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return 'image/png';
+    }
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xFF &&
+        bytes[1] == 0xD8 &&
+        bytes[2] == 0xFF) {
+      return 'image/jpeg';
+    }
+    if (bytes.length >= 12 &&
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50) {
+      return 'image/webp';
+    }
+    return 'image/png';
   }
 }

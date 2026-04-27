@@ -252,4 +252,12 @@ class StorageKeys {
       'workflow_enhance_upscale_factor';
   static const String workflowEnhanceStrength = 'workflow_enhance_strength';
   static const String workflowEnhanceNoise = 'workflow_enhance_noise';
+
+  // 反推/本地模型设置
+  static const String reversePromptStateJson = 'reverse_prompt_state_json';
+  static const String onnxTaggerModelDirectory = 'onnx_tagger_model_directory';
+  static const String localOnnxUpscaleModelDirectory =
+      'local_onnx_upscale_model_directory';
+  static const String localOnnxUpscaleModel = 'local_onnx_upscale_model';
+  static const String assetProtectionMode = 'asset_protection_mode';
 }

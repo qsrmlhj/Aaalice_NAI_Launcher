@@ -10,6 +10,7 @@ import '../../../../core/utils/app_logger.dart';
 import '../../../../core/utils/hive_storage_helper.dart';
 import '../../../../core/utils/localization_extension.dart';
 import '../../../../core/utils/vibe_library_path_helper.dart';
+import '../../../../data/services/local_onnx_model_service.dart';
 import '../../../providers/image_save_settings_provider.dart';
 import '../../../providers/share_image_settings_provider.dart';
 import '../../../widgets/common/app_toast.dart';
@@ -50,10 +51,36 @@ class _StorageSettingsSectionState
     }
   }
 
+  Future<void> _selectLocalOnnxDirectory({
+    required bool tagger,
+  }) async {
+    try {
+      final result = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: tagger ? '选择 ONNX tagger 模型文件夹' : '选择本地 ONNX 放大模型文件夹',
+      );
+      if (result == null) {
+        return;
+      }
+      final service = ref.read(localOnnxModelServiceProvider);
+      if (tagger) {
+        await service.setTaggerDirectory(result);
+      } else {
+        await service.setUpscaleDirectory(result);
+      }
+      if (mounted) {
+        setState(() {});
+        AppToast.success(context, '模型文件夹已保存');
+      }
+    } catch (e) {
+      if (mounted) AppToast.error(context, '选择文件夹失败: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final saveSettings = ref.watch(imageSaveSettingsNotifierProvider);
     final shareSettings = ref.watch(shareImageSettingsProvider);
+    final localOnnxService = ref.watch(localOnnxModelServiceProvider);
 
     return SettingsCard(
       title: context.l10n.settings_storage,
@@ -140,6 +167,46 @@ class _StorageSettingsSectionState
                   .read(shareImageSettingsProvider.notifier)
                   .setStripMetadataForCopyAndDrag(value);
             },
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.shield_outlined),
+            title: const Text('资产保护模式'),
+            subtitle: const Text(
+              '强制复制/拖拽使用净化副本，清除 PNG 文本块、EXIF 与 NAI 隐写水印，并避免暴露原始文件路径。',
+            ),
+            value: shareSettings.assetProtectionMode,
+            onChanged: (value) async {
+              await ref
+                  .read(shareImageSettingsProvider.notifier)
+                  .setAssetProtectionMode(value);
+            },
+          ),
+          const Divider(height: 24),
+          ListTile(
+            leading: const Icon(Icons.sell_outlined),
+            title: const Text('本地 ONNX tagger 模型文件夹'),
+            subtitle: Text(
+              localOnnxService.taggerDirectory.isEmpty
+                  ? '未配置'
+                  : localOnnxService.taggerDirectory,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _selectLocalOnnxDirectory(tagger: true),
+          ),
+          ListTile(
+            leading: const Icon(Icons.memory_rounded),
+            title: const Text('本地 ONNX 放大模型文件夹'),
+            subtitle: Text(
+              localOnnxService.upscaleDirectory.isEmpty
+                  ? '未配置'
+                  : localOnnxService.upscaleDirectory,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _selectLocalOnnxDirectory(tagger: false),
           ),
           // Vibe库保存路径设置
           const VibeLibraryPathTile(),
