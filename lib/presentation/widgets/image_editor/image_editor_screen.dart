@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -37,11 +39,196 @@ enum _EditorEffectType {
   brightness,
   contrast,
   saturation,
+  temperature,
+  gamma,
   grayscale,
   invert,
   sepia,
+  denoise,
   blur,
   sharpen,
+  cropToSelection,
+  rotateLeft,
+  rotateRight,
+  flipHorizontal,
+  flipVertical,
+}
+
+class _EffectCropRect {
+  const _EffectCropRect({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+
+  final int x;
+  final int y;
+  final int width;
+  final int height;
+}
+
+class _EditorEffectJob {
+  const _EditorEffectJob({
+    required this.imageBytes,
+    required this.effectType,
+    required this.intensity,
+    this.maxPreviewDimension = 0,
+    this.cropRect,
+  });
+
+  final Uint8List imageBytes;
+  final _EditorEffectType effectType;
+  final double intensity;
+  final int maxPreviewDimension;
+  final _EffectCropRect? cropRect;
+}
+
+class _EditorEffectResult {
+  const _EditorEffectResult({
+    required this.bytes,
+    required this.width,
+    required this.height,
+  });
+
+  final Uint8List bytes;
+  final int width;
+  final int height;
+}
+
+_EditorEffectResult _runEditorEffectJob(_EditorEffectJob job) {
+  var source = img.decodeImage(job.imageBytes);
+  if (source == null) {
+    throw StateError('无法解码当前图层');
+  }
+
+  var cropRect = job.cropRect;
+  if (job.maxPreviewDimension > 0) {
+    final maxSide = math.max(source.width, source.height);
+    if (maxSide > job.maxPreviewDimension) {
+      final scale = job.maxPreviewDimension / maxSide;
+      source = img.copyResize(
+        source,
+        width: math.max(1, (source.width * scale).round()),
+        height: math.max(1, (source.height * scale).round()),
+      );
+      if (cropRect != null) {
+        cropRect = _scaleCropRect(cropRect, scale, source);
+      }
+    }
+  }
+
+  final effected = _applyEditorImageEffect(
+    source,
+    job.effectType,
+    job.intensity,
+    cropRect: cropRect,
+  );
+  return _EditorEffectResult(
+    bytes: Uint8List.fromList(img.encodePng(effected)),
+    width: effected.width,
+    height: effected.height,
+  );
+}
+
+_EffectCropRect _scaleCropRect(
+  _EffectCropRect rect,
+  double scale,
+  img.Image source,
+) {
+  final x = (rect.x * scale).round().clamp(0, source.width - 1).toInt();
+  final y = (rect.y * scale).round().clamp(0, source.height - 1).toInt();
+  final width = math
+      .max(1, (rect.width * scale).round())
+      .clamp(1, source.width - x)
+      .toInt();
+  final height = math
+      .max(1, (rect.height * scale).round())
+      .clamp(1, source.height - y)
+      .toInt();
+  return _EffectCropRect(x: x, y: y, width: width, height: height);
+}
+
+img.Image _applyEditorImageEffect(
+  img.Image source,
+  _EditorEffectType effectType,
+  double intensity, {
+  _EffectCropRect? cropRect,
+}) {
+  final work = img.Image.from(source);
+  switch (effectType) {
+    case _EditorEffectType.brightness:
+      return img.adjustColor(
+        work,
+        brightness: (1.0 + intensity).clamp(0.0, 2.0),
+      );
+    case _EditorEffectType.contrast:
+      return img.adjustColor(
+        work,
+        contrast: (1.0 + intensity).clamp(0.0, 2.0),
+      );
+    case _EditorEffectType.saturation:
+      return img.adjustColor(
+        work,
+        saturation: (1.0 + intensity).clamp(0.0, 2.0),
+      );
+    case _EditorEffectType.temperature:
+      return _applyTemperature(work, intensity);
+    case _EditorEffectType.gamma:
+      return img.gamma(work, gamma: math.pow(2.0, intensity).toDouble());
+    case _EditorEffectType.grayscale:
+      return img.grayscale(work);
+    case _EditorEffectType.invert:
+      return img.invert(work);
+    case _EditorEffectType.sepia:
+      return img.sepia(work, amount: intensity.clamp(0.0, 1.0));
+    case _EditorEffectType.denoise:
+      return img.smooth(work, weight: (1.0 - intensity).clamp(0.05, 1.0));
+    case _EditorEffectType.blur:
+      return img.gaussianBlur(work, radius: (intensity * 12).round());
+    case _EditorEffectType.sharpen:
+      return img.convolution(
+        work,
+        filter: const [0, -1, 0, -1, 5, -1, 0, -1, 0],
+        amount: intensity.clamp(0.0, 1.0),
+      );
+    case _EditorEffectType.cropToSelection:
+      return _cropToRect(work, cropRect);
+    case _EditorEffectType.rotateLeft:
+      return img.copyRotate(work, angle: -90);
+    case _EditorEffectType.rotateRight:
+      return img.copyRotate(work, angle: 90);
+    case _EditorEffectType.flipHorizontal:
+      return img.flipHorizontal(work);
+    case _EditorEffectType.flipVertical:
+      return img.flipVertical(work);
+  }
+}
+
+img.Image _applyTemperature(img.Image source, double intensity) {
+  final shift = (intensity * 48).round();
+  for (final pixel in source) {
+    pixel
+      ..r = (pixel.r + shift).round().clamp(0, 255)
+      ..b = (pixel.b - shift).round().clamp(0, 255);
+  }
+  return source;
+}
+
+img.Image _cropToRect(img.Image source, _EffectCropRect? cropRect) {
+  if (cropRect == null) {
+    throw StateError('裁剪到选区需要先创建一个选区');
+  }
+  final output = img.Image(width: source.width, height: source.height);
+  final cropped = img.copyCrop(
+    source,
+    x: cropRect.x,
+    y: cropRect.y,
+    width: cropRect.width,
+    height: cropRect.height,
+  );
+  img.compositeImage(output, cropped, dstX: cropRect.x, dstY: cropRect.y);
+  return output;
 }
 
 /// 图像编辑器返回结果
@@ -785,14 +972,82 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
   }
 
   Future<void> _showEffectsDialog() async {
+    final layer = _state.layerManager.activeLayer;
+    if (layer == null || layer.locked || !layer.hasContent) {
+      AppToast.warning(context, '请选择一个非锁定且有内容的图层');
+      return;
+    }
+
+    final sourceBytes = await _readLayerPng(layer);
+    if (!mounted) return;
+    if (sourceBytes == null) {
+      AppToast.error(context, '无法读取当前图层');
+      return;
+    }
+
     var effectType = _EditorEffectType.brightness;
     var intensity = 0.25;
+    var previewBytes = sourceBytes;
+    var previewLoading = false;
+    var previewError = '';
+    var previewVersion = 0;
+    var previewInitialized = false;
+    var dialogOpen = true;
+    Timer? previewDebounce;
+
+    Future<void> refreshPreview(StateSetter setDialogState) async {
+      previewDebounce?.cancel();
+      final version = ++previewVersion;
+      setDialogState(() {
+        previewLoading = true;
+        previewError = '';
+      });
+
+      previewDebounce = Timer(const Duration(milliseconds: 180), () async {
+        try {
+          final cropRect = _selectionCropRect();
+          final job = _EditorEffectJob(
+            imageBytes: sourceBytes,
+            effectType: effectType,
+            intensity: intensity,
+            maxPreviewDimension: 420,
+            cropRect: cropRect,
+          );
+          final result = await Isolate.run(
+            () => _runEditorEffectJob(job),
+          );
+          if (!dialogOpen || !mounted || version != previewVersion) {
+            return;
+          }
+          setDialogState(() {
+            previewBytes = result.bytes;
+            previewLoading = false;
+          });
+        } catch (e) {
+          if (!dialogOpen || !mounted || version != previewVersion) {
+            return;
+          }
+          setDialogState(() {
+            previewLoading = false;
+            previewError = e.toString();
+          });
+        }
+      });
+    }
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
+            if (!previewInitialized) {
+              previewInitialized = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (dialogOpen && mounted) {
+                  unawaited(refreshPreview(setState));
+                }
+              });
+            }
             return AlertDialog(
               title: const Text('本地后处理 / Effects'),
               content: SizedBox(
@@ -816,27 +1071,57 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
                           effectType = value;
                           intensity = _defaultEffectIntensity(value);
                         });
+                        unawaited(refreshPreview(setState));
                       },
                       decoration: const InputDecoration(labelText: '效果'),
                     ),
                     const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Text('强度 ${intensity.toStringAsFixed(2)}'),
-                        Expanded(
-                          child: Slider(
-                            value: intensity,
-                            min: _effectMin(effectType),
-                            max: _effectMax(effectType),
-                            divisions: 20,
-                            onChanged: (value) =>
-                                setState(() => intensity = value),
+                    if (_effectHasIntensity(effectType))
+                      Row(
+                        children: [
+                          Text('强度 ${intensity.toStringAsFixed(2)}'),
+                          Expanded(
+                            child: Slider(
+                              value: intensity,
+                              min: _effectMin(effectType),
+                              max: _effectMax(effectType),
+                              divisions: 20,
+                              onChanged: (value) {
+                                setState(() => intensity = value);
+                                unawaited(refreshPreview(setState));
+                              },
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 180,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _buildEffectPreviewPane(
+                              title: '原图',
+                              bytes: sourceBytes,
+                              loading: false,
+                              error: '',
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildEffectPreviewPane(
+                              title: '预览',
+                              bytes: previewBytes,
+                              loading: previewLoading,
+                              error: previewError,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(height: 12),
                     const Text(
-                      '效果会应用到当前活动图层，并写入撤销历史。若需要处理整张图，请先合并或选择对应底图图层。',
+                      '预览不会修改原图；点击应用后才会把结果写入当前活动图层和撤销历史。',
                     ),
                   ],
                 ),
@@ -856,10 +1141,65 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
         );
       },
     );
+    dialogOpen = false;
+    previewDebounce?.cancel();
 
     if (confirmed == true) {
       await _applyEffect(effectType, intensity);
     }
+  }
+
+  Widget _buildEffectPreviewPane({
+    required String title,
+    required Uint8List bytes,
+    required bool loading,
+    required String error,
+  }) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 28, 8, 8),
+              child: error.isNotEmpty
+                  ? Center(
+                      child: Text(
+                        error,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.error,
+                        ),
+                      ),
+                    )
+                  : Image.memory(bytes, fit: BoxFit.contain),
+            ),
+          ),
+          Positioned(
+            left: 8,
+            top: 6,
+            child: Text(title, style: theme.textTheme.labelMedium),
+          ),
+          if (loading)
+            const Positioned(
+              right: 8,
+              top: 8,
+              child: SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Future<void> _applyEffect(
@@ -873,23 +1213,22 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     }
 
     try {
-      final rendered = await _renderLayerToImage(layer);
-      final raw = await rendered.toByteData(format: ui.ImageByteFormat.png);
-      rendered.dispose();
+      final sourceBytes = await _readLayerPng(layer);
       if (!mounted) return;
-      if (raw == null) {
+      if (sourceBytes == null) {
         AppToast.error(context, '无法读取当前图层');
         return;
       }
 
-      final source = img.decodePng(raw.buffer.asUint8List());
-      if (source == null) {
-        AppToast.error(context, '无法解码当前图层');
-        return;
-      }
-
-      final effected = _applyImageEffect(source, effectType, intensity);
-      final bytes = Uint8List.fromList(img.encodePng(effected));
+      final cropRect = _selectionCropRect();
+      final job = _EditorEffectJob(
+        imageBytes: sourceBytes,
+        effectType: effectType,
+        intensity: intensity,
+        cropRect: cropRect,
+      );
+      final result = await Isolate.run(() => _runEditorEffectJob(job));
+      final bytes = result.bytes;
       final newImage = await _decodeUiImage(bytes);
       if (!mounted) return;
       _state.historyManager.execute(
@@ -907,6 +1246,16 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     } catch (e) {
       if (!mounted) return;
       AppToast.error(context, '应用效果失败: $e');
+    }
+  }
+
+  Future<Uint8List?> _readLayerPng(dynamic layer) async {
+    final rendered = await _renderLayerToImage(layer);
+    try {
+      final raw = await rendered.toByteData(format: ui.ImageByteFormat.png);
+      return raw?.buffer.asUint8List();
+    } finally {
+      rendered.dispose();
     }
   }
 
@@ -933,55 +1282,24 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     }
   }
 
-  img.Image _applyImageEffect(
-    img.Image source,
-    _EditorEffectType effectType,
-    double intensity,
-  ) {
-    final work = img.Image.from(source);
-    switch (effectType) {
-      case _EditorEffectType.brightness:
-        return img.adjustColor(
-          work,
-          brightness: (1.0 + intensity).clamp(0.0, 2.0),
-        );
-      case _EditorEffectType.contrast:
-        return img.adjustColor(
-          work,
-          contrast: (1.0 + intensity).clamp(0.0, 2.0),
-        );
-      case _EditorEffectType.saturation:
-        return img.adjustColor(
-          work,
-          saturation: (1.0 + intensity).clamp(0.0, 2.0),
-        );
-      case _EditorEffectType.grayscale:
-        return img.grayscale(work);
-      case _EditorEffectType.invert:
-        return img.invert(work);
-      case _EditorEffectType.sepia:
-        return img.sepia(work, amount: intensity.clamp(0.0, 1.0));
-      case _EditorEffectType.blur:
-        return img.gaussianBlur(work, radius: (intensity * 12).round());
-      case _EditorEffectType.sharpen:
-        return img.convolution(
-          work,
-          filter: const [0, -1, 0, -1, 5, -1, 0, -1, 0],
-          amount: intensity.clamp(0.0, 1.0),
-        );
-    }
-  }
-
   String _effectLabel(_EditorEffectType type) {
     return switch (type) {
       _EditorEffectType.brightness => '亮度',
       _EditorEffectType.contrast => '对比度',
       _EditorEffectType.saturation => '饱和度',
+      _EditorEffectType.temperature => '色温',
+      _EditorEffectType.gamma => '伽马',
       _EditorEffectType.grayscale => '灰度',
       _EditorEffectType.invert => '反相',
       _EditorEffectType.sepia => '复古棕褐',
+      _EditorEffectType.denoise => '降噪',
       _EditorEffectType.blur => '高斯模糊',
       _EditorEffectType.sharpen => '锐化',
+      _EditorEffectType.cropToSelection => '裁剪到选区',
+      _EditorEffectType.rotateLeft => '向左旋转 90°',
+      _EditorEffectType.rotateRight => '向右旋转 90°',
+      _EditorEffectType.flipHorizontal => '水平翻转',
+      _EditorEffectType.flipVertical => '垂直翻转',
     };
   }
 
@@ -990,11 +1308,15 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
       _EditorEffectType.brightness => 0.25,
       _EditorEffectType.contrast => 0.25,
       _EditorEffectType.saturation => 0.25,
+      _EditorEffectType.temperature => 0.25,
+      _EditorEffectType.gamma => 0.0,
       _EditorEffectType.grayscale => 1.0,
       _EditorEffectType.invert => 1.0,
       _EditorEffectType.sepia => 0.75,
+      _EditorEffectType.denoise => 0.45,
       _EditorEffectType.blur => 0.25,
       _EditorEffectType.sharpen => 0.65,
+      _ => 1.0,
     };
   }
 
@@ -1003,6 +1325,8 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
       _EditorEffectType.brightness => -0.8,
       _EditorEffectType.contrast => -0.8,
       _EditorEffectType.saturation => -1.0,
+      _EditorEffectType.temperature => -1.0,
+      _EditorEffectType.gamma => -1.0,
       _ => 0.0,
     };
   }
@@ -1016,6 +1340,45 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
       _EditorEffectType.blur => 1.0,
       _ => 1.0,
     };
+  }
+
+  bool _effectHasIntensity(_EditorEffectType type) {
+    return switch (type) {
+      _EditorEffectType.grayscale ||
+      _EditorEffectType.invert ||
+      _EditorEffectType.cropToSelection ||
+      _EditorEffectType.rotateLeft ||
+      _EditorEffectType.rotateRight ||
+      _EditorEffectType.flipHorizontal ||
+      _EditorEffectType.flipVertical =>
+        false,
+      _ => true,
+    };
+  }
+
+  _EffectCropRect? _selectionCropRect() {
+    final selection = _state.selectionPath;
+    if (selection == null) {
+      return null;
+    }
+    final bounds = selection.getBounds().intersect(
+          Offset.zero & _state.canvasSize,
+        );
+    if (bounds.isEmpty) {
+      return null;
+    }
+    final x = bounds.left.floor().clamp(0, _state.canvasSize.width - 1).toInt();
+    final y = bounds.top.floor().clamp(0, _state.canvasSize.height - 1).toInt();
+    final right =
+        bounds.right.ceil().clamp(x + 1, _state.canvasSize.width).toInt();
+    final bottom =
+        bounds.bottom.ceil().clamp(y + 1, _state.canvasSize.height).toInt();
+    return _EffectCropRect(
+      x: x,
+      y: y,
+      width: right - x,
+      height: bottom - y,
+    );
   }
 
   Widget _buildShortcutSection(String title, List<(String, String)> shortcuts) {
