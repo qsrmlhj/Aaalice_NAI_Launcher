@@ -74,11 +74,6 @@ class PromptAssistantConfigNotifier
     await _save();
   }
 
-  Future<void> setStreamOutput(bool value) async {
-    state = state.copyWith(streamOutput: value);
-    await _save();
-  }
-
   Future<void> upsertProvider(ProviderConfig provider) async {
     final providers = [...state.providers];
     final idx = providers.indexWhere((p) => p.id == provider.id);

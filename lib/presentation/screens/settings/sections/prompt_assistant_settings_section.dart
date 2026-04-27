@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -30,12 +32,6 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
             title: const Text('桌面浮层交互'),
             subtitle: const Text('启用 hover / 右键 / 快捷键行为'),
             onChanged: notifier.setDesktopOverlayEnabled,
-          ),
-          SwitchListTile(
-            value: state.streamOutput,
-            title: const Text('流式输出'),
-            subtitle: const Text('优化和翻译时逐段覆盖输入框'),
-            onChanged: notifier.setStreamOutput,
           ),
           const Divider(),
           _buildRouting(context, state, notifier),
@@ -118,9 +114,10 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
   }) {
     final providerId = state.routing.providerIdFor(taskType);
     final modelName = state.routing.modelFor(taskType);
-    final models = state.models
-        .where((m) => m.providerId == providerId && m.forTask == taskType)
-        .toList();
+    final models = state.modelsForProviderTask(
+      providerId: providerId,
+      taskType: taskType,
+    );
     final modelItems = models
         .map(
           (m) => DropdownMenuItem(
@@ -129,8 +126,16 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
           ),
         )
         .toList();
-    final modelValue =
-        models.any((m) => m.name == modelName) ? modelName : null;
+    final hasRealModel = models.any(
+      (m) => m.name.trim().isNotEmpty && m.name.trim() != 'default-model',
+    );
+    final useCurrentModel = models.any((m) => m.name == modelName) &&
+        !(modelName.trim() == 'default-model' && hasRealModel);
+    final modelValue = useCurrentModel
+        ? modelName
+        : models.isNotEmpty
+            ? models.first.name
+            : null;
 
     return _buildTaskRouteCard(
       context: context,
@@ -139,15 +144,19 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
       providerItems: providerItems,
       onProviderChanged: (value) {
         if (value == null) return;
-        final firstModel = state.models.firstWhere(
-          (m) => m.providerId == value && m.forTask == taskType,
-          orElse: () => ModelConfig(
-            providerId: value,
-            name: 'default-model',
-            displayName: 'default-model',
-            forTask: taskType,
-          ),
+        final providerModels = state.modelsForProviderTask(
+          providerId: value,
+          taskType: taskType,
         );
+        final firstModel = providerModels.isNotEmpty
+            ? providerModels.first
+            : ModelConfig(
+                providerId: value,
+                name: 'default-model',
+                displayName: 'default-model',
+                forTask: taskType,
+              );
+        unawaited(notifier.upsertModel(firstModel.copyWith(forTask: taskType)));
         notifier.setRouting(
           state.routing.copyWithTask(
             taskType: taskType,
@@ -162,6 +171,10 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
           ? null
           : (value) {
               if (value == null) return;
+              final selectedModel = models.firstWhere(
+                (model) => model.name == value,
+              );
+              unawaited(notifier.upsertModel(selectedModel));
               notifier.setRouting(
                 state.routing.copyWithTask(
                   taskType: taskType,
@@ -170,12 +183,6 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
                 ),
               );
             },
-      onParamsPressed: () => _showModelParamDialog(
-        context,
-        notifier,
-        state,
-        taskType,
-      ),
     );
   }
 
@@ -188,7 +195,6 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
     required String? modelValue,
     required List<DropdownMenuItem<String>> modelItems,
     required ValueChanged<String?>? onModelChanged,
-    required VoidCallback onParamsPressed,
   }) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -198,26 +204,9 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '$title任务',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: onParamsPressed,
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    minimumSize: const Size(0, 30),
-                  ),
-                  icon: const Icon(Icons.tune, size: 14),
-                  label: const Text('参数'),
-                ),
-              ],
+            Text(
+              '$title任务',
+              style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
@@ -492,7 +481,6 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
     final baseController = TextEditingController(text: provider?.baseUrl ?? '');
     final keyController = TextEditingController();
     var type = provider?.type ?? ProviderType.openaiCompatible;
-    var advancedParams = provider?.advancedParams ?? true;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -539,13 +527,6 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
                           const InputDecoration(labelText: 'API Key (留空不改)'),
                       obscureText: true,
                     ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: advancedParams,
-                      onChanged: (value) =>
-                          setState(() => advancedParams = value),
-                      title: const Text('启用高级参数'),
-                    ),
                   ],
                 ),
               ),
@@ -576,7 +557,6 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
       type: type,
       baseUrl: baseController.text.trim(),
       enabled: provider?.enabled ?? true,
-      advancedParams: advancedParams,
     );
 
     await notifier.upsertProvider(next);
@@ -768,112 +748,5 @@ class PromptAssistantSettingsSection extends ConsumerWidget {
     );
 
     await notifier.upsertRule(next);
-  }
-
-  Future<void> _showModelParamDialog(
-    BuildContext context,
-    PromptAssistantConfigNotifier notifier,
-    PromptAssistantConfigState state,
-    AssistantTaskType taskType,
-  ) async {
-    final providerId = state.routing.providerIdFor(taskType);
-    final modelName = state.routing.modelFor(taskType);
-
-    final model = state.models.firstWhere(
-      (m) =>
-          m.providerId == providerId &&
-          m.name == modelName &&
-          m.forTask == taskType,
-      orElse: () => ModelConfig(
-        providerId: providerId,
-        name: modelName,
-        displayName: modelName,
-        forTask: taskType,
-        isDefault: true,
-      ),
-    );
-
-    final nameController = TextEditingController(text: model.name);
-    final displayController = TextEditingController(text: model.displayName);
-    final temperatureController =
-        TextEditingController(text: model.temperature.toString());
-    final topPController = TextEditingController(text: model.topP.toString());
-    final maxTokensController =
-        TextEditingController(text: model.maxTokens.toString());
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text('${taskType.label}模型参数'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(labelText: '模型名'),
-                ),
-                TextField(
-                  controller: displayController,
-                  decoration: const InputDecoration(labelText: '显示名'),
-                ),
-                TextField(
-                  controller: temperatureController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'temperature'),
-                ),
-                TextField(
-                  controller: topPController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'top_p'),
-                ),
-                TextField(
-                  controller: maxTokensController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'max_tokens'),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('保存'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) return;
-
-    final nextModel = model.copyWith(
-      name: nameController.text.trim().isEmpty
-          ? model.name
-          : nameController.text.trim(),
-      displayName: displayController.text.trim().isEmpty
-          ? model.displayName
-          : displayController.text.trim(),
-      temperature: double.tryParse(temperatureController.text.trim()) ??
-          model.temperature,
-      topP: double.tryParse(topPController.text.trim()) ?? model.topP,
-      maxTokens:
-          int.tryParse(maxTokensController.text.trim()) ?? model.maxTokens,
-    );
-
-    await notifier.upsertModel(nextModel);
-
-    await notifier.setRouting(
-      state.routing.copyWithTask(
-        taskType: taskType,
-        providerId: providerId,
-        model: nextModel.name,
-      ),
-    );
   }
 }

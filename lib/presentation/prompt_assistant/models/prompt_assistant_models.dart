@@ -25,15 +25,12 @@ class ProviderConfig {
   final ProviderType type;
   final String baseUrl;
   final bool enabled;
-  final bool advancedParams;
-
   const ProviderConfig({
     required this.id,
     required this.name,
     required this.type,
     required this.baseUrl,
     this.enabled = true,
-    this.advancedParams = true,
   });
 
   ProviderConfig copyWith({
@@ -42,7 +39,6 @@ class ProviderConfig {
     ProviderType? type,
     String? baseUrl,
     bool? enabled,
-    bool? advancedParams,
   }) {
     return ProviderConfig(
       id: id ?? this.id,
@@ -50,7 +46,6 @@ class ProviderConfig {
       type: type ?? this.type,
       baseUrl: baseUrl ?? this.baseUrl,
       enabled: enabled ?? this.enabled,
-      advancedParams: advancedParams ?? this.advancedParams,
     );
   }
 
@@ -60,7 +55,6 @@ class ProviderConfig {
         'type': type.name,
         'baseUrl': baseUrl,
         'enabled': enabled,
-        'advancedParams': advancedParams,
       };
 
   factory ProviderConfig.fromJson(Map<String, dynamic> json) {
@@ -73,7 +67,6 @@ class ProviderConfig {
       ),
       baseUrl: json['baseUrl'] as String? ?? '',
       enabled: json['enabled'] as bool? ?? true,
-      advancedParams: json['advancedParams'] as bool? ?? true,
     );
   }
 }
@@ -83,9 +76,6 @@ class ModelConfig {
   final String name;
   final String displayName;
   final AssistantTaskType forTask;
-  final double temperature;
-  final double topP;
-  final int maxTokens;
   final bool isDefault;
 
   const ModelConfig({
@@ -93,20 +83,17 @@ class ModelConfig {
     required this.name,
     required this.displayName,
     required this.forTask,
-    this.temperature = 0.7,
-    this.topP = 0.9,
-    this.maxTokens = 1024,
     this.isDefault = false,
   });
+
+  bool get isPlaceholder =>
+      name.trim().isEmpty || name.trim() == 'default-model';
 
   ModelConfig copyWith({
     String? providerId,
     String? name,
     String? displayName,
     AssistantTaskType? forTask,
-    double? temperature,
-    double? topP,
-    int? maxTokens,
     bool? isDefault,
   }) {
     return ModelConfig(
@@ -114,9 +101,6 @@ class ModelConfig {
       name: name ?? this.name,
       displayName: displayName ?? this.displayName,
       forTask: forTask ?? this.forTask,
-      temperature: temperature ?? this.temperature,
-      topP: topP ?? this.topP,
-      maxTokens: maxTokens ?? this.maxTokens,
       isDefault: isDefault ?? this.isDefault,
     );
   }
@@ -126,9 +110,6 @@ class ModelConfig {
         'name': name,
         'displayName': displayName,
         'forTask': forTask.name,
-        'temperature': temperature,
-        'topP': topP,
-        'maxTokens': maxTokens,
         'isDefault': isDefault,
       };
 
@@ -141,9 +122,6 @@ class ModelConfig {
         (t) => t.name == json['forTask'],
         orElse: () => AssistantTaskType.llm,
       ),
-      temperature: (json['temperature'] as num?)?.toDouble() ?? 0.7,
-      topP: (json['topP'] as num?)?.toDouble() ?? 0.9,
-      maxTokens: (json['maxTokens'] as num?)?.toInt() ?? 1024,
       isDefault: json['isDefault'] as bool? ?? false,
     );
   }
@@ -387,7 +365,7 @@ class PromptAssistantConfigState {
     return const PromptAssistantConfigState(
       enabled: true,
       desktopOverlayEnabled: true,
-      streamOutput: true,
+      streamOutput: false,
       providers: [
         ProviderConfig(
           id: 'pollinations',
@@ -501,7 +479,7 @@ class PromptAssistantConfigState {
       enabled: enabled ?? this.enabled,
       desktopOverlayEnabled:
           desktopOverlayEnabled ?? this.desktopOverlayEnabled,
-      streamOutput: streamOutput ?? this.streamOutput,
+      streamOutput: false,
       providers: providers ?? this.providers,
       models: models ?? this.models,
       routing: routing ?? this.routing,
@@ -513,7 +491,7 @@ class PromptAssistantConfigState {
   Map<String, dynamic> toJson() => {
         'enabled': enabled,
         'desktopOverlayEnabled': desktopOverlayEnabled,
-        'streamOutput': streamOutput,
+        'streamOutput': false,
         'providers': providers.map((e) => e.toJson()).toList(),
         'models': models.map((e) => e.toJson()).toList(),
         'routing': routing.toJson(),
@@ -521,6 +499,17 @@ class PromptAssistantConfigState {
       };
 
   String encode() => jsonEncode(toJson());
+
+  List<ModelConfig> modelsForProviderTask({
+    required String providerId,
+    required AssistantTaskType taskType,
+  }) {
+    return _modelsForProviderTask(
+      models,
+      providerId: providerId,
+      taskType: taskType,
+    );
+  }
 
   factory PromptAssistantConfigState.decode(String raw) {
     final json = jsonDecode(raw) as Map<String, dynamic>;
@@ -539,7 +528,9 @@ class PromptAssistantConfigState {
             .map((e) => ModelConfig.fromJson(e as Map<String, dynamic>))
             .toList()
         : defaults.models;
-    final models = _mergeDefaultModels(decodedModels, defaults.models);
+    final models = _expandProviderModelsToAllTasks(
+      _mergeDefaultModels(decodedModels, defaults.models),
+    );
 
     var routing = TaskRoutingConfig.fromJson(
       (json['routing'] as Map?)?.cast<String, dynamic>() ??
@@ -569,6 +560,11 @@ class PromptAssistantConfigState {
         characterReplaceModel: defaults.routing.characterReplaceModel,
       );
     }
+    routing = _normalizeRoutingModels(
+      routing: routing,
+      providers: providers,
+      models: models,
+    );
 
     final rulesRaw = json['rules'];
     final decodedRules = rulesRaw is List && rulesRaw.isNotEmpty
@@ -581,7 +577,7 @@ class PromptAssistantConfigState {
     return PromptAssistantConfigState(
       enabled: json['enabled'] as bool? ?? true,
       desktopOverlayEnabled: json['desktopOverlayEnabled'] as bool? ?? true,
-      streamOutput: json['streamOutput'] as bool? ?? true,
+      streamOutput: false,
       providers: providers,
       models: models,
       routing: routing,
@@ -607,6 +603,117 @@ class PromptAssistantConfigState {
       }
     }
     return result;
+  }
+
+  static List<ModelConfig> _expandProviderModelsToAllTasks(
+    List<ModelConfig> models,
+  ) {
+    final result = [...models];
+    final namesByProvider = <String, Map<String, ModelConfig>>{};
+
+    for (final model in result) {
+      namesByProvider.putIfAbsent(model.providerId, () => {})[model.name] =
+          model;
+    }
+
+    for (final entry in namesByProvider.entries) {
+      for (final model in entry.value.values) {
+        for (final taskType in AssistantTaskType.values) {
+          final exists = result.any(
+            (candidate) =>
+                candidate.providerId == model.providerId &&
+                candidate.name == model.name &&
+                candidate.forTask == taskType,
+          );
+          if (!exists) {
+            result.add(model.copyWith(forTask: taskType));
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  static TaskRoutingConfig _normalizeRoutingModels({
+    required TaskRoutingConfig routing,
+    required List<ProviderConfig> providers,
+    required List<ModelConfig> models,
+  }) {
+    var next = routing;
+
+    for (final taskType in AssistantTaskType.values) {
+      final providerId = next.providerIdFor(taskType);
+      if (!providers.any((provider) => provider.id == providerId)) {
+        continue;
+      }
+
+      final candidates = _modelsForProviderTask(
+        models,
+        providerId: providerId,
+        taskType: taskType,
+      );
+      if (candidates.isEmpty) {
+        continue;
+      }
+
+      final routedModel = next.modelFor(taskType);
+      final hasRoutedModel =
+          candidates.any((candidate) => candidate.name == routedModel);
+      final isPlaceholderRoute =
+          routedModel.trim().isEmpty || routedModel.trim() == 'default-model';
+      final shouldReplacePlaceholder = isPlaceholderRoute &&
+          candidates.any((candidate) => !candidate.isPlaceholder);
+
+      if (!hasRoutedModel || shouldReplacePlaceholder) {
+        next = next.copyWithTask(
+          taskType: taskType,
+          providerId: providerId,
+          model: candidates.first.name,
+        );
+      }
+    }
+
+    return next;
+  }
+
+  static List<ModelConfig> _modelsForProviderTask(
+    List<ModelConfig> source, {
+    required String providerId,
+    required AssistantTaskType taskType,
+  }) {
+    final candidates = <ModelConfig>[];
+    final names = <String>{};
+
+    void addCandidate(ModelConfig model) {
+      if (!names.add(model.name)) {
+        return;
+      }
+      candidates.add(model.copyWith(forTask: taskType));
+    }
+
+    for (final model in source) {
+      if (model.providerId == providerId && model.forTask == taskType) {
+        addCandidate(model);
+      }
+    }
+
+    for (final model in source) {
+      if (model.providerId == providerId) {
+        addCandidate(model);
+      }
+    }
+
+    candidates.sort((a, b) {
+      final aPlaceholder = a.isPlaceholder;
+      final bPlaceholder = b.isPlaceholder;
+      if (aPlaceholder != bPlaceholder) {
+        return aPlaceholder ? 1 : -1;
+      }
+      return a.displayName.compareTo(b.displayName);
+    });
+
+    return candidates;
   }
 
   static List<PromptRuleTemplate> _mergeDefaultRules(

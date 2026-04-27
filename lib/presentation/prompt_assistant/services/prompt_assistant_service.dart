@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 
+import '../../../core/utils/app_logger.dart';
 import '../models/prompt_assistant_models.dart';
 import '../providers/prompt_assistant_config_provider.dart';
 import 'prompt_assistant_api_client.dart';
@@ -116,13 +117,52 @@ class PromptAssistantService {
     required String characterName,
     required String characterPrompt,
   }) async* {
+    final sourcePrompt = input.trim();
+    final targetCharacterPrompt = characterPrompt.trim();
+    AppLogger.d(
+      'character replace input sourceLen=${sourcePrompt.length} targetLen=${targetCharacterPrompt.length} '
+          'source="${_previewForLog(sourcePrompt)}" target="${_previewForLog(targetCharacterPrompt)}"',
+      'PromptAssistant',
+    );
+
     yield* _runTask(
       sessionId: sessionId,
       taskType: AssistantTaskType.characterReplace,
-      userContent:
-          '目标角色名称：$characterName\n目标角色提示词：$characterPrompt\n\n待替换提示词：\n$input',
-      userInstruction: '请只替换角色身份和角色外观相关部分，保留动作、构图、场景、画风、镜头、质量词和负面约束之外的上下文。',
+      userContent: buildCharacterReplacementUserContent(
+        sourcePrompt: sourcePrompt,
+        characterName: characterName,
+        characterPrompt: targetCharacterPrompt,
+      ),
+      userInstruction: characterReplacementInstruction,
     );
+  }
+
+  static const String characterReplacementInstruction =
+      '仅输出替换后的完整单行英文逗号分隔提示词，不要输出分析、解释、删除/保留清单或 Markdown。';
+
+  static String buildCharacterReplacementUserContent({
+    required String sourcePrompt,
+    required String characterName,
+    required String characterPrompt,
+  }) {
+    return [
+      '待替换提示词（以这一段为主，保留非角色内容）：',
+      sourcePrompt.trim(),
+      '',
+      '目标角色名称：',
+      characterName.trim(),
+      '',
+      '目标角色提示词（只作为替换角色块）：',
+      characterPrompt.trim(),
+    ].join('\n');
+  }
+
+  static String _previewForLog(String value) {
+    final normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (normalized.length <= 240) {
+      return normalized;
+    }
+    return '${normalized.substring(0, 240)}...';
   }
 
   Stream<StreamingChunk> _runTask({
@@ -144,22 +184,28 @@ class PromptAssistantService {
       ),
     );
 
-    final model = config.models.firstWhere(
-      (m) =>
-          m.providerId == provider.id &&
-          m.forTask == taskType &&
-          m.name == routingModel,
-      orElse: () => config.models.firstWhere(
-        (m) => m.providerId == provider.id && m.forTask == taskType,
-        orElse: () => ModelConfig(
-          providerId: provider.id,
-          name: routingModel,
-          displayName: routingModel,
-          forTask: taskType,
-          isDefault: true,
-        ),
-      ),
+    final taskModels = config.modelsForProviderTask(
+      providerId: provider.id,
+      taskType: taskType,
     );
+    final hasRealModel = taskModels.any((m) => !m.isPlaceholder);
+    final shouldIgnoreRoutedPlaceholder = (routingModel.trim().isEmpty ||
+            routingModel.trim() == 'default-model') &&
+        hasRealModel;
+    final model = shouldIgnoreRoutedPlaceholder
+        ? taskModels.firstWhere((m) => !m.isPlaceholder)
+        : taskModels.firstWhere(
+            (m) => m.name == routingModel,
+            orElse: () => taskModels.isNotEmpty
+                ? taskModels.first
+                : ModelConfig(
+                    providerId: provider.id,
+                    name: routingModel,
+                    displayName: routingModel,
+                    forTask: taskType,
+                    isDefault: true,
+                  ),
+          );
 
     final apiKey = await _ref
         .read(promptAssistantConfigProvider.notifier)
@@ -185,10 +231,6 @@ class PromptAssistantService {
       provider: provider,
       model: model.name,
       messages: messages,
-      temperature: model.temperature,
-      topP: model.topP,
-      maxTokens: model.maxTokens,
-      advancedParams: provider.advancedParams,
       apiKey: apiKey,
     );
   }
