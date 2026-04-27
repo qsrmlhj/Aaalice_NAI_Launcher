@@ -11,9 +11,26 @@ import 'package:nai_launcher/data/services/vibe_import_service.dart';
 
 class _FakeVibeLibraryImportRepository implements VibeLibraryImportRepository {
   final List<VibeLibraryEntry> savedEntries = <VibeLibraryEntry>[];
+  int getAllEntriesCalls = 0;
+  int findEntryByNameCalls = 0;
 
   @override
-  Future<List<VibeLibraryEntry>> getAllEntries() async => savedEntries;
+  Future<List<VibeLibraryEntry>> getAllEntries() async {
+    getAllEntriesCalls++;
+    return savedEntries;
+  }
+
+  @override
+  Future<VibeLibraryEntry?> findEntryByName(String name) async {
+    findEntryByNameCalls++;
+    final normalized = name.trim().toLowerCase();
+    for (final entry in savedEntries) {
+      if (entry.name.trim().toLowerCase() == normalized) {
+        return entry;
+      }
+    }
+    return null;
+  }
 
   @override
   Future<VibeLibraryEntry> saveEntry(VibeLibraryEntry entry) async {
@@ -51,6 +68,8 @@ void main() {
         repository.savedEntries.single.rawImageData,
         isNotEmpty,
       );
+      expect(repository.getAllEntriesCalls, 0);
+      expect(repository.findEntryByNameCalls, greaterThan(0));
     });
   });
 
