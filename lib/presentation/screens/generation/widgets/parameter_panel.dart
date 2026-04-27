@@ -7,6 +7,7 @@ import '../../../../core/utils/localization_extension.dart';
 import '../../../../data/models/image/resolution_preset.dart';
 import '../../../providers/generation/generation_params_selectors.dart';
 import '../../../providers/image_generation_provider.dart';
+import '../../../utils/asset_protection_guard.dart';
 import '../../../widgets/common/themed_dropdown.dart';
 import '../../../widgets/common/themed_input.dart';
 import '../../../widgets/common/themed_button.dart';
@@ -85,12 +86,20 @@ class _ParameterPanelState extends ConsumerState<ParameterPanel> {
                   ? () => ref
                       .read(imageGenerationNotifierProvider.notifier)
                       .cancel()
-                  : () {
+                  : () async {
                       if (params.prompt.isEmpty) {
                         AppToast.info(
                           context,
                           context.l10n.generation_pleaseInputPrompt,
                         );
+                        return;
+                      }
+                      final confirmed =
+                          await AssetProtectionGuard.confirmHighAnlasCost(
+                        context: context,
+                        ref: ref,
+                      );
+                      if (!confirmed || !context.mounted) {
                         return;
                       }
                       ref

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,6 +9,7 @@ import 'package:nai_launcher/presentation/providers/image_generation_provider.da
 import 'package:nai_launcher/presentation/providers/queue_execution_provider.dart';
 import 'package:nai_launcher/presentation/providers/replication_queue_provider.dart';
 import 'package:nai_launcher/presentation/router/app_router.dart';
+import 'package:nai_launcher/presentation/utils/asset_protection_guard.dart';
 import 'package:nai_launcher/presentation/widgets/common/app_toast.dart';
 import 'package:nai_launcher/presentation/widgets/common/draggable_number_input.dart';
 import 'package:nai_launcher/presentation/widgets/generation/auto_save_toggle_chip.dart';
@@ -218,7 +221,7 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
             isGenerating: isGenerating,
             showCancel: showCancel,
             generationState: generationState,
-            onGenerate: () => _handleGenerate(context, ref),
+            onGenerate: () => unawaited(_handleGenerate(context, ref)),
             onCancel: () =>
                 ref.read(imageGenerationNotifierProvider.notifier).cancel(),
           ),
@@ -246,13 +249,21 @@ class _GenerationControlsState extends ConsumerState<GenerationControls> {
     AppToast.success(context, context.l10n.queue_taskAdded);
   }
 
-  void _handleGenerate(
+  Future<void> _handleGenerate(
     BuildContext context,
     WidgetRef ref,
-  ) {
+  ) async {
     final params = ref.read(generationParamsNotifierProvider);
     if (params.prompt.isEmpty) {
       AppToast.warning(context, context.l10n.generation_pleaseInputPrompt);
+      return;
+    }
+
+    final confirmed = await AssetProtectionGuard.confirmHighAnlasCost(
+      context: context,
+      ref: ref,
+    );
+    if (!confirmed || !context.mounted) {
       return;
     }
 

@@ -35,6 +35,7 @@ import '../../providers/gallery_scan_progress_provider.dart';
 import '../../providers/reverse_prompt_provider.dart';
 import '../../router/app_router.dart';
 import '../../services/image_workflow_launcher.dart';
+import '../../utils/asset_protection_guard.dart';
 import '../../providers/selection_mode_provider.dart';
 import '../../widgets/bulk_metadata_edit_dialog.dart';
 import '../../widgets/collection_select_dialog.dart';
@@ -370,6 +371,15 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
       icon: Icons.delete_outline,
     );
     if (confirmed) {
+      final protected = await AssetProtectionGuard.confirmDangerousAction(
+        context: context,
+        ref: ref,
+        title: '保护模式：确认删除分类',
+        content: '将删除此分类记录，文件夹及内容会保留。请再次确认。',
+        confirmText: '确认删除',
+        icon: Icons.delete_outline,
+      );
+      if (!protected || !mounted) return;
       await ref
           .read(galleryCategoryNotifierProvider.notifier)
           .deleteCategory(id, deleteFolder: false);
@@ -392,6 +402,16 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
   }
 
   Future<void> _handleImageDrop(String imagePath, String categoryId) async {
+    final protected = await AssetProtectionGuard.confirmDangerousAction(
+      context: context,
+      ref: ref,
+      title: '保护模式：确认移动图片',
+      content: '将把图片移动到目标分类文件夹。请确认不是误拖拽。',
+      confirmText: '确认移动',
+      icon: Icons.drive_file_move_outline,
+    );
+    if (!protected || !mounted) return;
+
     final newPath = await ref
         .read(galleryCategoryNotifierProvider.notifier)
         .moveImageToCategory(imagePath, categoryId);
@@ -661,6 +681,16 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
 
     if (!confirmed || !mounted) return;
 
+    final protected = await AssetProtectionGuard.confirmDangerousAction(
+      context: context,
+      ref: ref,
+      title: '保护模式：再次确认删除',
+      content: '将永久删除 ${selectedImages.length} 张本地图片文件。此操作无法撤销。',
+      confirmText: l10n.common_delete,
+      icon: Icons.delete_forever_outlined,
+    );
+    if (!protected || !mounted) return;
+
     final deletedImages = <LocalImageRecord>[];
     for (final image in selectedImages) {
       try {
@@ -707,8 +737,11 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
 
     if (outputPath == null || !mounted) return;
 
-    final finalPath =
+    final requestedPath =
         outputPath.endsWith('.zip') ? outputPath : '$outputPath.zip';
+    final finalPath = AssetProtectionGuard.shouldPreventOverwrite(ref)
+        ? await AssetProtectionGuard.resolveNonOverwritingPath(requestedPath)
+        : requestedPath;
 
     AppToast.info(context, '正在打包 ${selectedImages.length} 张图片...');
 
@@ -787,6 +820,16 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
     );
 
     if (selectedFolder == null || !mounted) return;
+
+    final protected = await AssetProtectionGuard.confirmDangerousAction(
+      context: context,
+      ref: ref,
+      title: '保护模式：确认批量移动',
+      content: '将移动 ${selectedImages.length} 张本地图片文件到目标文件夹。请确认不是误操作。',
+      confirmText: '确认移动',
+      icon: Icons.drive_file_move_outline,
+    );
+    if (!protected || !mounted) return;
 
     final imagePaths = selectedImages.map((img) => img.path).toList();
     final movedCount =
@@ -1213,6 +1256,15 @@ class _LocalGalleryScreenState extends ConsumerState<LocalGalleryScreen> {
     );
 
     if (confirmed == true && mounted) {
+      final protected = await AssetProtectionGuard.confirmDangerousAction(
+        context: context,
+        ref: ref,
+        title: '保护模式：再次确认删除',
+        content: '将永久删除图片「${path.basename(record.path)}」。此操作无法撤销。',
+        confirmText: '确认删除',
+        icon: Icons.delete_outline,
+      );
+      if (!protected || !mounted) return;
       try {
         final file = File(record.path);
         if (await file.exists()) {

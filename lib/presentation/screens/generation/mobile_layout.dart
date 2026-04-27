@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/utils/localization_extension.dart';
 import '../../providers/image_generation_provider.dart';
 import '../../providers/prompt_maximize_provider.dart';
+import '../../utils/asset_protection_guard.dart';
 import '../../widgets/anlas/anlas_balance_chip.dart';
 import '../../widgets/common/themed_divider.dart';
 import '../../widgets/common/themed_scaffold.dart';
@@ -165,13 +166,21 @@ class _MobileGenerationLayoutState
     );
   }
 
-  void _handleGenerate(
+  Future<void> _handleGenerate(
     BuildContext context,
     WidgetRef ref,
-  ) {
+  ) async {
     final params = ref.read(generationParamsNotifierProvider);
     if (params.prompt.isEmpty) {
       AppToast.info(context, context.l10n.generation_pleaseInputPrompt);
+      return;
+    }
+
+    final confirmed = await AssetProtectionGuard.confirmHighAnlasCost(
+      context: context,
+      ref: ref,
+    );
+    if (!confirmed || !context.mounted) {
       return;
     }
 

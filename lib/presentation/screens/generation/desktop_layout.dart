@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -15,6 +17,7 @@ import '../../router/app_router.dart';
 import '../../widgets/common/app_toast.dart';
 import '../../widgets/shortcuts/shortcut_aware_widget.dart';
 import '../../services/image_workflow_launcher.dart';
+import '../../utils/asset_protection_guard.dart';
 import 'widgets/resize_handle.dart';
 import 'widgets/left_panel.dart';
 import 'widgets/main_workspace.dart';
@@ -52,7 +55,9 @@ class _DesktopGenerationLayoutState
       if (isDocked) {
         ref.read(characterPanelDockProvider.notifier).undock();
         AppLogger.d(
-            'Auto-undocked character panel on maximize', 'DesktopLayout',);
+          'Auto-undocked character panel on maximize',
+          'DesktopLayout',
+        );
       }
     }
 
@@ -72,11 +77,8 @@ class _DesktopGenerationLayoutState
     final shortcuts = <String, VoidCallback>{
       // 生成图像
       ShortcutIds.generateImage: () {
-        final currentParams = ref.read(generationParamsNotifierProvider);
-        if (!isGenerating && currentParams.prompt.isNotEmpty) {
-          ref
-              .read(imageGenerationNotifierProvider.notifier)
-              .generate(currentParams);
+        if (!isGenerating) {
+          unawaited(_generateWithProtection());
         }
       },
       // 取消生成
@@ -182,5 +184,20 @@ class _DesktopGenerationLayoutState
         RightPanel(isResizing: _isResizingRight),
       ],
     );
+  }
+
+  Future<void> _generateWithProtection() async {
+    final currentParams = ref.read(generationParamsNotifierProvider);
+    if (currentParams.prompt.isEmpty) {
+      return;
+    }
+    final confirmed = await AssetProtectionGuard.confirmHighAnlasCost(
+      context: context,
+      ref: ref,
+    );
+    if (!confirmed || !mounted) {
+      return;
+    }
+    ref.read(imageGenerationNotifierProvider.notifier).generate(currentParams);
   }
 }
