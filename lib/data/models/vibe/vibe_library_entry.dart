@@ -164,7 +164,10 @@ class VibeLibraryEntry with _$VibeLibraryEntry {
   VibeLibraryEntry toDisplayEntry() {
     return copyWith(
       vibeEncoding: '',
+      vibeThumbnail: null,
       rawImageData: null,
+      thumbnail: null,
+      bundledVibePreviews: null,
       bundledVibeEncodings: null,
     );
   }

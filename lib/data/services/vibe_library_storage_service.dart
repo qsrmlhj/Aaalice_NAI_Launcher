@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -48,10 +51,16 @@ class VibeEntryRenameResult {
 /// 使用 Hive 本地存储，支持搜索、筛选和使用统计
 class VibeLibraryStorageService {
   static const String _entriesBoxName = 'vibe_library_entries';
-  static const String _displayEntriesBoxName = 'vibe_library_display_entries';
+  static const String _displayEntriesBoxName =
+      'vibe_library_display_entries_v2';
+  static const String _thumbnailCacheBoxName =
+      'vibe_library_thumbnail_cache_v1';
   static const String _categoriesBoxName = 'vibe_library_categories';
   static const String _displayCacheReadyKey =
-      'vibe_library_display_cache_ready_v1';
+      'vibe_library_display_cache_ready_v2';
+  static const int _displayThumbnailMaxDimension = 256;
+  static const int _displayThumbnailInlineLimitBytes = 64 * 1024;
+  static const int _displayThumbnailJpegQuality = 78;
   static const String _tag = 'VibeLibrary';
 
   VibeLibraryStorageService({VibeFileStorageService? fileStorage})
@@ -60,11 +69,15 @@ class VibeLibraryStorageService {
   Box<VibeLibraryEntry>? _entriesBox;
   LazyBox<VibeLibraryEntry>? _lazyEntriesBox;
   Box<VibeLibraryEntry>? _displayEntriesBox;
+  Box<Uint8List>? _thumbnailCacheBox;
   Box<VibeLibraryCategory>? _categoriesBox;
   Future<void>? _entriesInitFuture;
   Future<void>? _lazyEntriesInitFuture;
   Future<void>? _displayEntriesInitFuture;
+  Future<void>? _thumbnailCacheInitFuture;
   Future<void>? _categoriesInitFuture;
+  Future<void> _thumbnailLoadQueue = Future.value();
+  final Map<String, Future<Uint8List?>> _thumbnailLoadsById = {};
   final VibeFileStorageService _fileStorage;
 
   void _registerAdapters() {
@@ -98,6 +111,10 @@ class VibeLibraryStorageService {
 
   Future<Box<VibeLibraryEntry>> _openDisplayEntriesBox() async {
     return Hive.openBox<VibeLibraryEntry>(_displayEntriesBoxName);
+  }
+
+  Future<Box<Uint8List>> _openThumbnailCacheBox() async {
+    return Hive.openBox<Uint8List>(_thumbnailCacheBoxName);
   }
 
   Future<Box<VibeLibraryCategory>> _openCategoriesBox() async {
@@ -253,6 +270,56 @@ class VibeLibraryStorageService {
     }
   }
 
+  Future<void> _ensureThumbnailCacheBox() async {
+    var awaitedActiveInit = false;
+    final span = VibePerformanceDiagnostics.start(
+      'storage.ensureThumbnailCacheBox',
+      details: {
+        'hadThumbnailCacheBox': _thumbnailCacheBox?.isOpen == true,
+      },
+    );
+    try {
+      if (_thumbnailCacheBox != null && _thumbnailCacheBox!.isOpen) {
+        return;
+      }
+
+      _registerAdapters();
+      final activeInit = _thumbnailCacheInitFuture;
+      if (activeInit != null) {
+        awaitedActiveInit = true;
+        await activeInit;
+        return;
+      }
+
+      final initFuture = _openThumbnailCacheBox().then((box) {
+        _thumbnailCacheBox = box;
+      });
+      _thumbnailCacheInitFuture = initFuture;
+      try {
+        await initFuture;
+      } catch (e, stackTrace) {
+        AppLogger.e(
+          'VibeLibrary thumbnail cache 初始化失败',
+          e,
+          stackTrace,
+          _tag,
+        );
+        rethrow;
+      } finally {
+        if (identical(_thumbnailCacheInitFuture, initFuture)) {
+          _thumbnailCacheInitFuture = null;
+        }
+      }
+    } finally {
+      span.finish(
+        details: {
+          'awaitedActiveInit': awaitedActiveInit,
+          'thumbnailCacheBoxOpen': _thumbnailCacheBox?.isOpen == true,
+        },
+      );
+    }
+  }
+
   Future<void> _ensureCategoriesBox() async {
     var awaitedActiveInit = false;
     final span = VibePerformanceDiagnostics.start(
@@ -334,6 +401,166 @@ class VibeLibraryStorageService {
 
     await _ensureDisplayEntriesBox();
     await _displayEntriesBox!.delete(id);
+  }
+
+  Future<void> _deleteDisplayThumbnailCache(String id) async {
+    await _ensureThumbnailCacheBox();
+    await _thumbnailCacheBox!.delete(id);
+  }
+
+  static Uint8List? _resizeDisplayThumbnailSync(Uint8List sourceBytes) {
+    final source = img.decodeImage(sourceBytes);
+    if (source == null) {
+      return null;
+    }
+
+    final longestSide = math.max(source.width, source.height);
+    if (longestSide <= _displayThumbnailMaxDimension &&
+        sourceBytes.length <= _displayThumbnailInlineLimitBytes) {
+      return sourceBytes;
+    }
+
+    final scale = _displayThumbnailMaxDimension / longestSide;
+    final width = math.max(1, (source.width * scale).round());
+    final height = math.max(1, (source.height * scale).round());
+    final resized = img.copyResize(
+      source,
+      width: width,
+      height: height,
+      interpolation: img.Interpolation.average,
+    );
+    return Uint8List.fromList(
+      img.encodeJpg(resized, quality: _displayThumbnailJpegQuality),
+    );
+  }
+
+  Future<Uint8List?> _normalizeDisplayThumbnail(Uint8List sourceBytes) async {
+    if (sourceBytes.isEmpty) {
+      return null;
+    }
+
+    if (sourceBytes.length <= _displayThumbnailInlineLimitBytes) {
+      return sourceBytes;
+    }
+
+    return Isolate.run(() => _resizeDisplayThumbnailSync(sourceBytes));
+  }
+
+  Uint8List? _pickDisplayThumbnailSource(VibeLibraryEntry entry) {
+    final thumbnail = entry.thumbnail;
+    if (thumbnail != null && thumbnail.isNotEmpty) {
+      return thumbnail;
+    }
+
+    final vibeThumbnail = entry.vibeThumbnail;
+    if (vibeThumbnail != null && vibeThumbnail.isNotEmpty) {
+      return vibeThumbnail;
+    }
+
+    final previews = entry.bundledVibePreviews;
+    if (previews != null && previews.isNotEmpty && previews.first.isNotEmpty) {
+      return previews.first;
+    }
+
+    final rawImageData = entry.rawImageData;
+    if (rawImageData != null && rawImageData.isNotEmpty) {
+      return rawImageData;
+    }
+
+    return null;
+  }
+
+  Future<Uint8List?> _loadAndCacheDisplayThumbnail(String id) async {
+    final span = VibePerformanceDiagnostics.start(
+      'storage.loadDisplayThumbnail',
+      details: {
+        'id': id,
+      },
+    );
+    var found = false;
+    var cached = false;
+    var sourceBytes = 0;
+    var resultBytes = 0;
+    try {
+      await _ensureThumbnailCacheBox();
+      final existing = _thumbnailCacheBox!.get(id);
+      if (existing != null && existing.isNotEmpty) {
+        cached = true;
+        resultBytes = existing.length;
+        return existing;
+      }
+
+      final entry = await _readStoredEntry(id);
+      if (entry == null) {
+        return null;
+      }
+      found = true;
+
+      final source = _pickDisplayThumbnailSource(entry);
+      if (source == null) {
+        return null;
+      }
+      sourceBytes = source.length;
+
+      final thumbnail = await _normalizeDisplayThumbnail(source);
+      if (thumbnail == null || thumbnail.isEmpty) {
+        return null;
+      }
+
+      resultBytes = thumbnail.length;
+      await _thumbnailCacheBox!.put(id, thumbnail);
+      return thumbnail;
+    } catch (e, stackTrace) {
+      AppLogger.e('Failed to load display thumbnail', e, stackTrace, _tag);
+      return null;
+    } finally {
+      span.finish(
+        details: {
+          'found': found,
+          'cached': cached,
+          'sourceBytes': sourceBytes,
+          'resultBytes': resultBytes,
+        },
+      );
+    }
+  }
+
+  Future<Uint8List?> _queueDisplayThumbnailLoad(String id) {
+    final queued = _thumbnailLoadQueue.then(
+      (_) => _loadAndCacheDisplayThumbnail(id),
+    );
+    _thumbnailLoadQueue = queued.then<void>(
+      (_) {},
+      onError: (_) {},
+    );
+    return queued;
+  }
+
+  /// 按需读取列表缩略图。
+  ///
+  /// 列表展示缓存本身不再携带图片字节，避免打开 Vibe 库时一次性加载
+  /// 大量缩略图。卡片可调用该方法串行生成/读取小缩略图缓存。
+  Future<Uint8List?> getDisplayThumbnail(String id) async {
+    await _ensureThumbnailCacheBox();
+    final cached = _thumbnailCacheBox!.get(id);
+    if (cached != null && cached.isNotEmpty) {
+      return cached;
+    }
+
+    final activeLoad = _thumbnailLoadsById[id];
+    if (activeLoad != null) {
+      return activeLoad;
+    }
+
+    final load = _queueDisplayThumbnailLoad(id);
+    _thumbnailLoadsById[id] = load;
+    try {
+      return await load;
+    } finally {
+      if (identical(_thumbnailLoadsById[id], load)) {
+        _thumbnailLoadsById.remove(id);
+      }
+    }
   }
 
   Future<List<VibeLibraryEntry>> _rebuildDisplayEntriesCache() async {
@@ -574,6 +801,7 @@ class VibeLibraryStorageService {
 
       await _putStoredEntry(entryToSave);
       await _upsertDisplayEntryIfReady(entryToSave);
+      await _deleteDisplayThumbnailCache(entryToSave.id);
       AppLogger.d('Entry saved: ${entryToSave.displayName}', _tag);
       return entryToSave;
     } catch (e, stackTrace) {
@@ -611,6 +839,7 @@ class VibeLibraryStorageService {
 
       await _putStoredEntry(updatedEntry);
       await _upsertDisplayEntryIfReady(updatedEntry);
+      await _deleteDisplayThumbnailCache(updatedEntry.id);
       return await getEntry(updatedEntry.id) ?? updatedEntry;
     } catch (e, stackTrace) {
       AppLogger.e('Failed to save entry params', e, stackTrace, _tag);
@@ -652,6 +881,7 @@ class VibeLibraryStorageService {
 
       await _putStoredEntry(entry);
       await _upsertDisplayEntryIfReady(entry);
+      await _deleteDisplayThumbnailCache(entry.id);
       AppLogger.d('Bundle entry saved: ${entry.displayName}', _tag);
       return entry;
     } catch (e, stackTrace) {
@@ -853,6 +1083,7 @@ class VibeLibraryStorageService {
 
       await _deleteStoredEntry(id);
       await _deleteDisplayEntryIfReady(id);
+      await _deleteDisplayThumbnailCache(id);
       AppLogger.d('Entry deleted: $id', _tag);
       return true;
     } catch (e, stackTrace) {
@@ -1056,6 +1287,7 @@ class VibeLibraryStorageService {
       final updatedEntry = entry.copyWith(thumbnail: thumbnail);
       await _putStoredEntry(updatedEntry);
       await _upsertDisplayEntryIfReady(updatedEntry);
+      await _deleteDisplayThumbnailCache(id);
       AppLogger.d(
         'Entry thumbnail updated: ${entry.displayName}',
         'VibeLibrary',
@@ -1124,6 +1356,8 @@ class VibeLibraryStorageService {
       await _clearStoredEntries();
       await _ensureDisplayEntriesBox();
       await _displayEntriesBox!.clear();
+      await _ensureThumbnailCacheBox();
+      await _thumbnailCacheBox!.clear();
       await _setDisplayCacheReady(true);
       AppLogger.i('All entries cleared', 'VibeLibrary');
     } catch (e, stackTrace) {
@@ -1152,11 +1386,13 @@ class VibeLibraryStorageService {
         onUpsertEntry: (entry) async {
           await _entriesBox!.put(entry.id, entry);
           await _upsertDisplayEntryIfReady(entry);
+          await _deleteDisplayThumbnailCache(entry.id);
         },
         onDeleteEntry: removeMissingEntries
             ? (entry) async {
                 await _entriesBox!.delete(entry.id);
                 await _deleteDisplayEntryIfReady(entry.id);
+                await _deleteDisplayThumbnailCache(entry.id);
               }
             : null,
       );
@@ -1914,6 +2150,9 @@ class VibeLibraryStorageService {
       }
       if (_displayEntriesBox != null && _displayEntriesBox!.isOpen) {
         await _displayEntriesBox!.close();
+      }
+      if (_thumbnailCacheBox != null && _thumbnailCacheBox!.isOpen) {
+        await _thumbnailCacheBox!.close();
       }
       if (_categoriesBox != null && _categoriesBox!.isOpen) {
         await _categoriesBox!.close();
