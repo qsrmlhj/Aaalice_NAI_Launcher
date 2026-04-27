@@ -6,6 +6,7 @@ class BuiltinWorkflows {
 
   static List<WorkflowTemplate> get all => [
         seedvr2Upscale,
+        modelUpscale,
       ];
 
   /// SeedVR2 超分工作流
@@ -19,7 +20,7 @@ class BuiltinWorkflows {
   ///     │    └── vae <── [7] SeedVR2LoadVAEModel
   ///     └─> [17] SaveImage (保存并通过 HTTP history 获取)
   ///   [18] Float (放大倍数)
-  static final WorkflowTemplate seedvr2Upscale = WorkflowTemplate(
+  static const WorkflowTemplate seedvr2Upscale = WorkflowTemplate(
     id: 'builtin_seedvr2_upscale',
     name: 'SeedVR2 超分',
     description: '使用 SeedVR2 AI 模型进行超分辨率放大，效果优秀',
@@ -31,7 +32,7 @@ class BuiltinWorkflows {
     isBuiltin: true,
     slots: [
       // 输入：源图像
-      const WorkflowSlot(
+      WorkflowSlot(
         id: 'input_image',
         direction: SlotDirection.input,
         dataType: SlotDataType.image,
@@ -41,7 +42,7 @@ class BuiltinWorkflows {
         required: true,
       ),
       // 参数：放大倍数
-      const WorkflowSlot(
+      WorkflowSlot(
         id: 'scale_multiplier',
         direction: SlotDirection.parameter,
         dataType: SlotDataType.number,
@@ -54,7 +55,7 @@ class BuiltinWorkflows {
         step: 0.1,
       ),
       // 参数：超分模型
-      const WorkflowSlot(
+      WorkflowSlot(
         id: 'dit_model',
         direction: SlotDirection.parameter,
         dataType: SlotDataType.choice,
@@ -65,7 +66,7 @@ class BuiltinWorkflows {
         choices: ['seedvr2_ema_7b_fp16.safetensors'],
       ),
       // 参数：种子
-      const WorkflowSlot(
+      WorkflowSlot(
         id: 'seed',
         direction: SlotDirection.parameter,
         dataType: SlotDataType.integer,
@@ -77,7 +78,7 @@ class BuiltinWorkflows {
         max: 4294967295,
       ),
       // 输出：通过 HTTP history 获取（比 WS 二进制帧更可靠）
-      const WorkflowSlot(
+      WorkflowSlot(
         id: 'output_image',
         direction: SlotDirection.output,
         dataType: SlotDataType.image,
@@ -89,6 +90,84 @@ class BuiltinWorkflows {
       ),
     ],
     workflowJson: _seedvr2WorkflowJson,
+  );
+
+  /// ComfyUI 普通超分模型工作流
+  ///
+  /// 节点图：
+  ///   [1] LoadImage (输入)
+  ///     ├─> [3] ImageUpscaleWithModel
+  ///     │    └── upscale_model <── [2] UpscaleModelLoader
+  ///     ├─> [4] ImageScale (Lanczos 缩放到用户指定最终尺寸)
+  ///     └─> [5] SaveImage
+  ///
+  /// 这种流程用于 `models/upscale_models` 里的 `.pth/.pt/.safetensors`
+  /// 等轻量超分模型；模型本身先输出原生倍率，再由 Lanczos 统一修正到
+  /// 启动器中设置的目标倍率。
+  static const WorkflowTemplate modelUpscale = WorkflowTemplate(
+    id: 'builtin_comfy_model_upscale',
+    name: 'ComfyUI 普通超分模型',
+    description: '使用 ComfyUI UpscaleModelLoader 加载普通超分模型，并用 Lanczos 修正最终倍率',
+    version: '1.0.0',
+    author: 'NAI Launcher',
+    category: WorkflowCategory.enhance,
+    requiresInputImage: true,
+    requiresMask: false,
+    isBuiltin: true,
+    slots: [
+      WorkflowSlot(
+        id: 'input_image',
+        direction: SlotDirection.input,
+        dataType: SlotDataType.image,
+        nodeId: '1',
+        field: 'image',
+        label: '输入图像',
+        required: true,
+      ),
+      WorkflowSlot(
+        id: 'upscale_model',
+        direction: SlotDirection.parameter,
+        dataType: SlotDataType.choice,
+        nodeId: '2',
+        field: 'model_name',
+        label: '超分模型',
+        defaultValue: 'realesrganX4plusAnime_v1.pt',
+        choices: ['realesrganX4plusAnime_v1.pt'],
+      ),
+      WorkflowSlot(
+        id: 'target_width',
+        direction: SlotDirection.parameter,
+        dataType: SlotDataType.integer,
+        nodeId: '4',
+        field: 'width',
+        label: '目标宽度',
+        defaultValue: 1024,
+        min: 1,
+        max: 16384,
+      ),
+      WorkflowSlot(
+        id: 'target_height',
+        direction: SlotDirection.parameter,
+        dataType: SlotDataType.integer,
+        nodeId: '4',
+        field: 'height',
+        label: '目标高度',
+        defaultValue: 1024,
+        min: 1,
+        max: 16384,
+      ),
+      WorkflowSlot(
+        id: 'output_image',
+        direction: SlotDirection.output,
+        dataType: SlotDataType.image,
+        nodeId: '5',
+        field: null,
+        label: '输出图像',
+        outputMethod: OutputMethod.httpHistory,
+        nodeClass: 'SaveImage',
+      ),
+    ],
+    workflowJson: _modelUpscaleWorkflowJson,
   );
 
   // ==================== SeedVR2 超分 ====================
@@ -185,6 +264,52 @@ class BuiltinWorkflows {
       },
       'class_type': 'Float',
       '_meta': {'title': 'API_SCALE_MULTIPLIER'},
+    },
+  };
+
+  // ==================== 普通超分模型 ====================
+
+  static const Map<String, dynamic> _modelUpscaleWorkflowJson = {
+    '1': {
+      'inputs': {
+        'image': 'placeholder.png',
+      },
+      'class_type': 'LoadImage',
+      '_meta': {'title': 'Load Image'},
+    },
+    '2': {
+      'inputs': {
+        'model_name': 'realesrganX4plusAnime_v1.pt',
+      },
+      'class_type': 'UpscaleModelLoader',
+      '_meta': {'title': 'Upscale Model Loader'},
+    },
+    '3': {
+      'inputs': {
+        'upscale_model': ['2', 0],
+        'image': ['1', 0],
+      },
+      'class_type': 'ImageUpscaleWithModel',
+      '_meta': {'title': 'Image Upscale With Model'},
+    },
+    '4': {
+      'inputs': {
+        'upscale_method': 'lanczos',
+        'width': 1024,
+        'height': 1024,
+        'crop': 'disabled',
+        'image': ['3', 0],
+      },
+      'class_type': 'ImageScale',
+      '_meta': {'title': 'Image Scale To Target'},
+    },
+    '5': {
+      'inputs': {
+        'filename_prefix': 'NAI_upscale',
+        'images': ['4', 0],
+      },
+      'class_type': 'SaveImage',
+      '_meta': {'title': 'Save Image'},
     },
   };
 }

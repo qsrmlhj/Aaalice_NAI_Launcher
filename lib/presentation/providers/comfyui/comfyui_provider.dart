@@ -292,7 +292,9 @@ class ComfyUITask extends _$ComfyUITask {
       } else {
         images.add(frame.data);
         AppLogger.d(
-            'Received final WS image: ${frame.data.length} bytes', _tag);
+          'Received final WS image: ${frame.data.length} bytes',
+          _tag,
+        );
       }
     });
 
@@ -325,7 +327,7 @@ class ComfyUITask extends _$ComfyUITask {
     try {
       var result = await completer.future.timeout(
         const Duration(minutes: 10),
-        onTimeout: () => throw ComfyUIApiException('超分超时（10分钟）'),
+        onTimeout: () => throw const ComfyUIApiException('超分超时（10分钟）'),
       );
       // SaveImageWebsocket 在部分版本/节点下可能未推送二进制帧，改从 history+view 拉取
       if (result.isEmpty) {
@@ -383,18 +385,21 @@ class ComfyUITask extends _$ComfyUITask {
     try {
       await completer.future.timeout(
         const Duration(minutes: 10),
-        onTimeout: () => throw ComfyUIApiException('任务超时（10分钟）'),
+        onTimeout: () => throw const ComfyUIApiException('任务超时（10分钟）'),
       );
 
       AppLogger.d(
-          'Task $promptId completed, fetching output images via HTTP...', _tag);
+        'Task $promptId completed, fetching output images via HTTP...',
+        _tag,
+      );
       final images = await conn.api!.getOutputImages(
         promptId,
         allowedNodeIds: outputNodeIds,
       );
       AppLogger.i(
-          'Got ${images.length} images from history (sizes: ${images.map((i) => i.length).toList()})',
-          _tag);
+        'Got ${images.length} images from history (sizes: ${images.map((i) => i.length).toList()})',
+        _tag,
+      );
       state =
           state.copyWith(status: ComfyUITaskStatus.completed, progress: 1.0);
       return images;
@@ -411,11 +416,16 @@ class ComfyUITask extends _$ComfyUITask {
   }
 }
 
-/// 从 ComfyUI object_info 获取 SeedVR2 可用的 DiT 模型列表
+/// 从 ComfyUI object_info 获取可用于超分的模型列表。
+///
+/// 包含：
+/// - SeedVR2LoadDiTModel 的 DiT 模型
+/// - UpscaleModelLoader 的普通超分模型（.pth/.pt/.safetensors 等）
 @riverpod
 class ComfyUISeedvr2Models extends _$ComfyUISeedvr2Models {
-  static const _tag = 'SeedVR2Models';
-  static const _nodeClass = 'SeedVR2LoadDiTModel';
+  static const _tag = 'ComfyUIUpscaleModels';
+  static const _seedvr2NodeClass = 'SeedVR2LoadDiTModel';
+  static const _upscaleNodeClass = 'UpscaleModelLoader';
   static const _fallback = ['seedvr2_ema_7b_fp16.safetensors'];
   bool _isFetching = false;
   bool _hasFetchedFromServer = false;
@@ -471,7 +481,9 @@ class ComfyUISeedvr2Models extends _$ComfyUISeedvr2Models {
       final connStatus = ref.read(comfyUIConnectionProvider);
       if (connStatus != ComfyUIConnectionStatus.connected) {
         AppLogger.d(
-            'Attempting to connect ComfyUI before fetching models...', _tag);
+          'Attempting to connect ComfyUI before fetching models...',
+          _tag,
+        );
         final ok = await connNotifier.connect();
         if (!ok) {
           AppLogger.w('Cannot fetch models: ComfyUI not connected', _tag);
@@ -488,57 +500,103 @@ class ComfyUISeedvr2Models extends _$ComfyUISeedvr2Models {
     }
 
     try {
-      final info = await conn!.api!.getObjectInfo(_nodeClass);
-      AppLogger.d('object_info raw keys: ${info.keys.toList()}', _tag);
+      final seedvr2Models = await _fetchModelsFromNode(
+        conn!,
+        nodeClass: _seedvr2NodeClass,
+        candidateFields: const ['model', 'dit_model', 'dit_model_name'],
+      );
+      final normalUpscaleModels = await _fetchModelsFromNode(
+        conn,
+        nodeClass: _upscaleNodeClass,
+        candidateFields: const ['model_name', 'upscale_model', 'model'],
+      );
 
-      final node = info[_nodeClass] as Map<String, dynamic>?;
+      final models = <String>[
+        ...seedvr2Models,
+        for (final model in normalUpscaleModels)
+          if (!seedvr2Models.contains(model)) model,
+      ];
+
+      if (models.isNotEmpty) {
+        AppLogger.i(
+          'Found ${seedvr2Models.length} SeedVR2 and '
+          '${normalUpscaleModels.length} regular upscale model(s)',
+          _tag,
+        );
+        state = models;
+        _hasFetchedFromServer = true;
+      } else {
+        AppLogger.w('Could not extract any ComfyUI upscale model list', _tag);
+      }
+    } catch (e, st) {
+      AppLogger.w('Failed to fetch ComfyUI upscale models: $e', _tag);
+      AppLogger.d('Stack: $st', _tag);
+    } finally {
+      _isFetching = false;
+    }
+  }
+
+  Future<List<String>> _fetchModelsFromNode(
+    ComfyUIConnectionManager conn, {
+    required String nodeClass,
+    required Iterable<String> candidateFields,
+  }) async {
+    try {
+      final info = await conn.api!.getObjectInfo(nodeClass);
+      AppLogger.d(
+        '$nodeClass object_info raw keys: ${info.keys.toList()}',
+        _tag,
+      );
+
+      final node = info[nodeClass] as Map<String, dynamic>?;
       if (node == null) {
         AppLogger.w(
-            'Node "$_nodeClass" not found. Available: ${info.keys.take(10)}',
-            _tag);
-        return;
+          'Node "$nodeClass" not found. Available: ${info.keys.take(10)}',
+          _tag,
+        );
+        return const [];
       }
 
       final input = node['input'] as Map<String, dynamic>?;
       if (input == null) {
-        AppLogger.w('Node has no "input" key. Keys: ${node.keys}', _tag);
-        return;
+        AppLogger.w('$nodeClass has no "input" key. Keys: ${node.keys}', _tag);
+        return const [];
       }
 
       final required = input['required'] as Map<String, dynamic>?;
       if (required == null) {
-        AppLogger.w('No "required" in input. Keys: ${input.keys}', _tag);
-        return;
+        AppLogger.w(
+          '$nodeClass has no required inputs. Keys: ${input.keys}',
+          _tag,
+        );
+        return const [];
       }
 
-      AppLogger.d('required fields: ${required.keys.toList()}', _tag);
-
+      AppLogger.d(
+        '$nodeClass required fields: ${required.keys.toList()}',
+        _tag,
+      );
       final models = extractChoiceListFromCandidateFields(
         required,
-        const ['model', 'dit_model', 'dit_model_name'],
+        candidateFields,
       );
 
       if (models != null && models.isNotEmpty) {
-        AppLogger.i('Found ${models.length} SeedVR2 models: $models', _tag);
-        state = models;
-        _hasFetchedFromServer = true;
-      } else {
-        AppLogger.w(
-          'Could not extract model list. Dumping required fields:',
+        return models;
+      }
+
+      AppLogger.w('Could not extract model list from $nodeClass', _tag);
+      for (final entry in required.entries) {
+        AppLogger.d(
+          '  ${entry.key}: ${entry.value.runtimeType} = '
+          '${_truncate(entry.value.toString(), 200)}',
           _tag,
         );
-        for (final entry in required.entries) {
-          AppLogger.d(
-            '  ${entry.key}: ${entry.value.runtimeType} = ${_truncate(entry.value.toString(), 200)}',
-            _tag,
-          );
-        }
       }
-    } catch (e, st) {
-      AppLogger.w('Failed to fetch SeedVR2 models: $e', _tag);
-      AppLogger.d('Stack: $st', _tag);
-    } finally {
-      _isFetching = false;
+      return const [];
+    } catch (e) {
+      AppLogger.w('Failed to fetch models from $nodeClass: $e', _tag);
+      return const [];
     }
   }
 
