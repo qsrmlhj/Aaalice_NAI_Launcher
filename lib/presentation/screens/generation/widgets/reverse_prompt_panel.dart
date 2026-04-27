@@ -1,21 +1,25 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:super_clipboard/super_clipboard.dart';
 import 'package:super_drag_and_drop/super_drag_and_drop.dart';
 
+import '../../../../data/models/character/character_prompt.dart';
+import '../../../../data/models/tag_library/tag_library_entry.dart';
 import '../../../../data/services/local_onnx_model_service.dart';
-import '../../../providers/character_prompt_provider.dart';
 import '../../../providers/generation/generation_params_notifier.dart';
 import '../../../providers/reverse_prompt_provider.dart';
+import '../../../providers/tag_library_page_provider.dart';
+import '../../../prompt_assistant/providers/prompt_assistant_history_provider.dart';
+import '../../../utils/asset_protection_guard.dart';
+import '../../../utils/dropped_file_reader.dart';
 import '../../../widgets/common/app_toast.dart';
 import '../../../widgets/common/collapsible_image_panel.dart';
 import '../../../widgets/common/decoded_memory_image.dart';
 import '../../../widgets/common/themed_divider.dart';
+import '../../../widgets/tag_library/tag_library_picker_dialog.dart';
 
 class ReversePromptPanel extends ConsumerStatefulWidget {
   const ReversePromptPanel({super.key});
@@ -91,6 +95,13 @@ class _ReversePromptPanelState extends ConsumerState<ReversePromptPanel> {
             if (state.llmPrompt.isNotEmpty) ...[
               const SizedBox(height: 8),
               _PromptOutputBlock(title: 'LLM 反推', text: state.llmPrompt),
+            ],
+            if (state.characterReplacePrompt.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _PromptOutputBlock(
+                title: '角色替换',
+                text: state.characterReplacePrompt,
+              ),
             ],
             if (state.finalPrompt.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -268,23 +279,29 @@ class _ReversePromptPanelState extends ConsumerState<ReversePromptPanel> {
               ),
             ),
             const SizedBox(height: 6),
-            Row(
-              children: [
-                Text('阈值 ${state.taggerThreshold.toStringAsFixed(2)}'),
-                Expanded(
-                  child: Slider(
-                    value: state.taggerThreshold,
-                    min: 0.05,
-                    max: 0.95,
-                    divisions: 18,
-                    onChanged: state.isProcessing
-                        ? null
-                        : ref
-                            .read(reversePromptProvider.notifier)
-                            .setTaggerThreshold,
+            _ThresholdSlider(
+              label: '通用标签阈值',
+              value: state.taggerGeneralThreshold,
+              onChanged: state.isProcessing
+                  ? null
+                  : ref
+                      .read(reversePromptProvider.notifier)
+                      .setTaggerGeneralThreshold,
+            ),
+            _ThresholdSlider(
+              label: '角色标签阈值',
+              value: state.taggerCharacterThreshold,
+              onChanged: state.isProcessing
+                  ? null
+                  : ref
+                      .read(reversePromptProvider.notifier)
+                      .setTaggerCharacterThreshold,
+            ),
+            Text(
+              '只输出 General / Character 分类标签；Rating、Artist、Copyright、Meta 等分类会被过滤。',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.white70,
                   ),
-                ),
-              ],
             ),
           ],
         );
@@ -293,34 +310,115 @@ class _ReversePromptPanelState extends ConsumerState<ReversePromptPanel> {
   }
 
   Widget _buildCharacterSelector(ReversePromptState state) {
-    final characters = ref
-        .watch(characterPromptNotifierProvider)
+    final selectedCharacter = ref
+        .watch(reversePromptCharacterProvider)
         .characters
         .where((c) => c.enabled && c.prompt.trim().isNotEmpty)
-        .toList();
-    final selected = characters.any((c) => c.id == state.selectedCharacterId)
-        ? state.selectedCharacterId
-        : null;
-    return DropdownButtonFormField<String>(
-      initialValue: selected,
-      isExpanded: true,
-      items: characters
-          .map(
-            (character) => DropdownMenuItem(
-              value: character.id,
-              child: Text(character.name),
+        .cast<CharacterPrompt?>()
+        .firstWhere((_) => true, orElse: () => null);
+    if (selectedCharacter == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '替换目标角色为空。这里从词库选择一个角色作为替换目标，不会注入到正向提示词。',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.white70,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: state.isProcessing
+                  ? null
+                  : _selectReverseCharacterFromLibrary,
+              icon: const Icon(Icons.library_books_outlined, size: 18),
+              label: const Text('从词库选择替换目标角色'),
             ),
-          )
-          .toList(),
-      onChanged: state.isProcessing
-          ? null
-          : ref.read(reversePromptProvider.notifier).setSelectedCharacterId,
-      decoration: const InputDecoration(
-        labelText: '替换目标角色',
-        hintText: '从提示词角色/词库中选择',
-        isDense: true,
+          ),
+        ],
+      );
+    }
+
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.person_search_rounded, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  selectedCharacter.name,
+                  style: theme.textTheme.labelLarge,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            selectedCharacter.prompt,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: state.isProcessing
+                    ? null
+                    : _selectReverseCharacterFromLibrary,
+                icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                label: const Text('更换'),
+              ),
+              TextButton.icon(
+                onPressed: state.isProcessing
+                    ? null
+                    : ref
+                        .read(reversePromptCharacterProvider.notifier)
+                        .clearReplacementCharacter,
+                icon: const Icon(Icons.close_rounded, size: 16),
+                label: const Text('清除'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
+  }
+
+  Future<void> _selectReverseCharacterFromLibrary() async {
+    final entry = await showDialog<TagLibraryEntry>(
+      context: context,
+      builder: (context) => const TagLibraryPickerDialog(title: '选择替换目标角色'),
+    );
+
+    if (entry == null) {
+      return;
+    }
+
+    ref.read(tagLibraryPageNotifierProvider.notifier).recordUsage(entry.id);
+    ref.read(reversePromptCharacterProvider.notifier).setReplacementCharacter(
+          CharacterPrompt.create(
+            name: entry.displayName,
+            prompt: entry.content,
+            thumbnailPath: entry.thumbnail,
+          ),
+        );
   }
 
   Widget _buildActions(ReversePromptState state) {
@@ -330,7 +428,7 @@ class _ReversePromptPanelState extends ConsumerState<ReversePromptPanel> {
           child: FilledButton.icon(
             onPressed: state.isProcessing || !state.canRun
                 ? null
-                : ref.read(reversePromptProvider.notifier).runChain,
+                : () => _runChainWithProtection(state),
             icon: state.isProcessing
                 ? const SizedBox(
                     width: 16,
@@ -346,9 +444,19 @@ class _ReversePromptPanelState extends ConsumerState<ReversePromptPanel> {
           onPressed: state.finalPrompt.trim().isEmpty
               ? null
               : () {
+                  final prompt = state.finalPrompt.trim();
+                  final currentPrompt =
+                      ref.read(generationParamsNotifierProvider).prompt;
+                  ref
+                      .read(promptAssistantHistoryProvider.notifier)
+                      .recordExternalChange(
+                        PromptHistorySessionIds.generationPrompt,
+                        before: currentPrompt,
+                        after: prompt,
+                      );
                   ref
                       .read(generationParamsNotifierProvider.notifier)
-                      .updatePrompt(state.finalPrompt.trim());
+                      .updatePrompt(prompt);
                   AppToast.success(context, '已发送到提示词');
                 },
           icon: const Icon(Icons.send_rounded, size: 18),
@@ -356,6 +464,21 @@ class _ReversePromptPanelState extends ConsumerState<ReversePromptPanel> {
         ),
       ],
     );
+  }
+
+  Future<void> _runChainWithProtection(ReversePromptState state) async {
+    if (state.useLlmReverse) {
+      final confirmed = await AssetProtectionGuard.confirmExternalImageSend(
+        context: context,
+        ref: ref,
+        targetName: '多模态 LLM 反推服务',
+        imageCount: state.images.length,
+      );
+      if (!confirmed || !mounted) {
+        return;
+      }
+    }
+    await ref.read(reversePromptProvider.notifier).runChain();
   }
 
   Future<void> _pickImages() async {
@@ -380,92 +503,58 @@ class _ReversePromptPanelState extends ConsumerState<ReversePromptPanel> {
   }
 
   Future<void> _handleDrop(PerformDropEvent event) async {
+    var handledAny = false;
     for (final item in event.session.items) {
       final reader = item.dataReader;
       if (reader == null) {
         continue;
       }
-      final file = await _readDroppedImage(reader);
+      final file = await DroppedFileReader.read(
+        reader,
+        logTag: 'ReversePromptDrop',
+      );
       if (file != null) {
+        handledAny = true;
         await ref
             .read(reversePromptProvider.notifier)
-            .addImage(file.$2, name: file.$1);
+            .addImage(file.bytes, name: file.fileName);
       }
     }
+    if (!handledAny && mounted) {
+      AppToast.warning(context, '拖入源未提供可读取的图片文件或图片链接');
+    }
   }
+}
 
-  Future<(String, Uint8List)?> _readDroppedImage(DataReader reader) async {
-    if (reader.canProvide(Formats.fileUri)) {
-      final uri = await _getFileUri(reader);
-      if (uri == null) {
-        return null;
-      }
-      final file = File(uri.toFilePath());
-      if (!await file.exists()) {
-        return null;
-      }
-      return (file.uri.pathSegments.last, await file.readAsBytes());
-    }
+class _ThresholdSlider extends StatelessWidget {
+  const _ThresholdSlider({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
 
-    final format = reader.canProvide(Formats.png)
-        ? Formats.png
-        : reader.canProvide(Formats.jpeg)
-            ? Formats.jpeg
-            : null;
-    if (format == null) {
-      return null;
-    }
-    final dropped = await _getImageFile(reader, format);
-    if (dropped == null) {
-      return null;
-    }
-    final extension = format == Formats.png ? 'png' : 'jpg';
-    return (
-      dropped.fileName ?? 'dropped_image.$extension',
-      await dropped.readAll()
-    );
-  }
+  final String label;
+  final double value;
+  final ValueChanged<double>? onChanged;
 
-  Future<Uri?> _getFileUri(DataReader reader) {
-    final completer = Completer<Uri?>();
-    final progress = reader.getValue(
-      Formats.fileUri,
-      (uri) {
-        if (!completer.isCompleted) completer.complete(uri);
-      },
-      onError: (_) {
-        if (!completer.isCompleted) completer.complete(null);
-      },
-    );
-    if (progress == null) {
-      return Future.value();
-    }
-    return completer.future.timeout(
-      const Duration(seconds: 10),
-      onTimeout: () => null,
-    );
-  }
-
-  Future<DataReaderFile?> _getImageFile(
-    DataReader reader,
-    FileFormat format,
-  ) {
-    final completer = Completer<DataReaderFile?>();
-    final progress = reader.getFile(
-      format,
-      (file) {
-        if (!completer.isCompleted) completer.complete(file);
-      },
-      onError: (_) {
-        if (!completer.isCompleted) completer.complete(null);
-      },
-    );
-    if (progress == null) {
-      return Future.value();
-    }
-    return completer.future.timeout(
-      const Duration(seconds: 10),
-      onTimeout: () => null,
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 104,
+          child: Text('$label ${value.toStringAsFixed(2)}'),
+        ),
+        Expanded(
+          child: Slider(
+            value: value,
+            min: 0.05,
+            max: 0.95,
+            divisions: 18,
+            onChanged: onChanged,
+          ),
+        ),
+      ],
     );
   }
 }

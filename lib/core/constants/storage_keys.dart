@@ -166,6 +166,8 @@ class StorageKeys {
   static const String tagLibraryEntriesData = 'tag_library_entries_data';
   static const String tagLibraryCategoriesData = 'tag_library_categories_data';
   static const String tagLibraryViewMode = 'tag_library_view_mode';
+  static const String tagLibraryPickerCategoryId =
+      'tag_library_picker_category_id';
 
   // Statistics Cache (统计数据缓存)
   static const String statisticsCacheBox = 'statistics_cache';
@@ -255,9 +257,23 @@ class StorageKeys {
 
   // 反推/本地模型设置
   static const String reversePromptStateJson = 'reverse_prompt_state_json';
+  static const String reversePromptCharacterConfigJson =
+      'reverse_prompt_character_config_json';
   static const String onnxTaggerModelDirectory = 'onnx_tagger_model_directory';
-  static const String localOnnxUpscaleModelDirectory =
-      'local_onnx_upscale_model_directory';
-  static const String localOnnxUpscaleModel = 'local_onnx_upscale_model';
+
+  // 保护模式设置
+  static const String protectionMode = 'protection_mode';
+  static const String protectionConfirmDangerousActions =
+      'protection_confirm_dangerous_actions';
+  static const String protectionWarnExternalImageSend =
+      'protection_warn_external_image_send';
+  static const String protectionPreventOverwrite =
+      'protection_prevent_overwrite';
+  static const String protectionWarnHighAnlasCost =
+      'protection_warn_high_anlas_cost';
+  static const String protectionHighAnlasCostThreshold =
+      'protection_high_anlas_cost_threshold';
+
+  // 旧版资产保护 key，保留读取兼容。
   static const String assetProtectionMode = 'asset_protection_mode';
 }

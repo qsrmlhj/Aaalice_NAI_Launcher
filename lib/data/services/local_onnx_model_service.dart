@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 import '../../core/constants/storage_keys.dart';
 import '../../core/storage/local_storage_service.dart';
 
-enum LocalOnnxModelKind { wd14Tagger, clTagger, upscaler, unknown }
+enum LocalOnnxModelKind { wd14Tagger, clTagger, unknown }
 
 class LocalOnnxModelDescriptor {
   const LocalOnnxModelDescriptor({
@@ -20,6 +20,8 @@ class LocalOnnxModelDescriptor {
   final String path;
   final LocalOnnxModelKind kind;
   final String? labelsPath;
+
+  bool get isOnnx => p.extension(path).toLowerCase() == '.onnx';
 }
 
 final localOnnxModelServiceProvider = Provider<LocalOnnxModelService>((ref) {
@@ -34,16 +36,8 @@ class LocalOnnxModelService {
   String get taggerDirectory =>
       _storage.getSetting<String>(StorageKeys.onnxTaggerModelDirectory) ?? '';
 
-  String get upscaleDirectory =>
-      _storage.getSetting<String>(StorageKeys.localOnnxUpscaleModelDirectory) ??
-      '';
-
   Future<void> setTaggerDirectory(String path) async {
     await _storage.setSetting(StorageKeys.onnxTaggerModelDirectory, path);
-  }
-
-  Future<void> setUpscaleDirectory(String path) async {
-    await _storage.setSetting(StorageKeys.localOnnxUpscaleModelDirectory, path);
   }
 
   Future<List<LocalOnnxModelDescriptor>> scanTaggerModels() {
@@ -52,16 +46,6 @@ class LocalOnnxModelService {
       allowedKinds: const {
         LocalOnnxModelKind.wd14Tagger,
         LocalOnnxModelKind.clTagger,
-        LocalOnnxModelKind.unknown,
-      },
-    );
-  }
-
-  Future<List<LocalOnnxModelDescriptor>> scanUpscaleModels() {
-    return _scanModels(
-      upscaleDirectory,
-      allowedKinds: const {
-        LocalOnnxModelKind.upscaler,
         LocalOnnxModelKind.unknown,
       },
     );
@@ -116,17 +100,21 @@ class LocalOnnxModelService {
     if (lower.contains('cl') && lower.contains('tagger')) {
       return LocalOnnxModelKind.clTagger;
     }
-    if (lower.contains('upscale') ||
-        lower.contains('esrgan') ||
-        lower.contains('swinir') ||
-        lower.contains('real')) {
-      return LocalOnnxModelKind.upscaler;
-    }
     return LocalOnnxModelKind.unknown;
   }
 
   Future<String?> _findLabelsFile(String onnxPath) async {
     final base = p.withoutExtension(onnxPath);
+    final lowerBaseName = p.basenameWithoutExtension(onnxPath).toLowerCase();
+    final directory = p.dirname(onnxPath);
+
+    if (lowerBaseName.contains('cl_tagger')) {
+      final mapping = p.join(directory, 'tag_mapping.json');
+      if (await File(mapping).exists()) {
+        return mapping;
+      }
+    }
+
     for (final extension in const ['.csv', '.txt', '.json']) {
       final candidate = '$base$extension';
       if (await File(candidate).exists()) {
@@ -134,8 +122,14 @@ class LocalOnnxModelService {
       }
     }
 
-    final directory = p.dirname(onnxPath);
-    for (final name in const ['selected_tags.csv', 'tags.csv', 'labels.txt']) {
+    for (final name in const [
+      'selected_tags.csv',
+      'tags.csv',
+      'labels.csv',
+      'labels.txt',
+      'classes.txt',
+      'tag_mapping.json',
+    ]) {
       final candidate = p.join(directory, name);
       if (await File(candidate).exists()) {
         return candidate;
