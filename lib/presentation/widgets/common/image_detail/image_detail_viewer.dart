@@ -36,11 +36,19 @@ class ImageDetailCallbacks {
   /// 复制图像回调
   final Future<void> Function(ImageDetailData image)? onCopyImage;
 
+  /// 发送到图生图回调
+  final Future<void> Function(ImageDetailData image)? onSendToImg2Img;
+
+  /// 发送到反推模块回调
+  final Future<void> Function(ImageDetailData image)? onSendToReversePrompt;
+
   const ImageDetailCallbacks({
     this.onFavoriteToggle,
     this.onReuseMetadata,
     this.onSave,
     this.onCopyImage,
+    this.onSendToImg2Img,
+    this.onSendToReversePrompt,
   });
 }
 
@@ -434,6 +442,15 @@ class _ImageDetailViewerState extends ConsumerState<ImageDetailViewer> {
                 ? () => widget.callbacks!.onSave!(_currentImage)
                 : null,
             onCopyImage: () => _copyImageToClipboard(context),
+            onSendToImg2Img: widget.callbacks?.onSendToImg2Img != null
+                ? () => widget.callbacks!.onSendToImg2Img!(_currentImage)
+                : null,
+            onSendToReversePrompt:
+                widget.callbacks?.onSendToReversePrompt != null
+                    ? () => widget.callbacks!.onSendToReversePrompt!(
+                          _currentImage,
+                        )
+                    : null,
           ),
         ),
 
@@ -556,8 +573,9 @@ class _ImageDetailViewerState extends ConsumerState<ImageDetailViewer> {
     try {
       final imageBytes = await _currentImage.getImageBytes();
       final fileName = _currentImage.fileInfo?.fileName ?? 'shared.png';
-      final stripMetadata =
-          ref.read(shareImageSettingsProvider).stripMetadataForCopyAndDrag;
+      final stripMetadata = ref
+          .read(shareImageSettingsProvider)
+          .effectiveStripMetadataForCopyAndDrag;
       final shareImage = await ImageShareSanitizer.prepareForCopyOrDrag(
         imageBytes,
         fileName: fileName,

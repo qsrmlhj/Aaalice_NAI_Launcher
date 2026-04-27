@@ -120,8 +120,9 @@ class _DraggableMemoryImageState extends ConsumerState<DraggableMemoryImage> {
   }
 
   Future<DragItem> _createDragItem() async {
-    final stripMetadata =
-        ref.read(shareImageSettingsProvider).stripMetadataForCopyAndDrag;
+    final stripMetadata = ref
+        .read(shareImageSettingsProvider)
+        .effectiveStripMetadataForCopyAndDrag;
 
     final item = DragItem(
       suggestedName: widget.fileName,
@@ -159,8 +160,9 @@ class _DraggableMemoryImageState extends ConsumerState<DraggableMemoryImage> {
   }
 
   void _warmTransferCache() {
-    final stripMetadata =
-        ref.read(shareImageSettingsProvider).stripMetadataForCopyAndDrag;
+    final stripMetadata = ref
+        .read(shareImageSettingsProvider)
+        .effectiveStripMetadataForCopyAndDrag;
     _transferCache.warmUp(stripMetadata: stripMetadata);
   }
 }

@@ -218,8 +218,9 @@ class _LocalImageCard3DState extends ConsumerState<LocalImageCard3D>
         return;
       }
 
-      final stripMetadata =
-          ref.read(shareImageSettingsProvider).stripMetadataForCopyAndDrag;
+      final stripMetadata = ref
+          .read(shareImageSettingsProvider)
+          .effectiveStripMetadataForCopyAndDrag;
       final sourceParts = sourceFile.path.split(RegExp(r'[/\\]'));
       final sourceName =
           sourceParts.isNotEmpty ? sourceParts.last : 'shared.png';

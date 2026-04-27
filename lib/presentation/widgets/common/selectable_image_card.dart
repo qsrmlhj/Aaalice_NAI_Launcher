@@ -840,8 +840,9 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
 
   Future<void> _copyImage(BuildContext context) async {
     try {
-      final stripMetadata =
-          ref.read(shareImageSettingsProvider).stripMetadataForCopyAndDrag;
+      final stripMetadata = ref
+          .read(shareImageSettingsProvider)
+          .effectiveStripMetadataForCopyAndDrag;
       final cache = _shareTransferCache ?? _createShareTransferCache();
       if (cache == null) {
         throw StateError('图像数据不可用，无法复制');
@@ -897,8 +898,9 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
   void _warmShareTransferCache() {
     final cache = _shareTransferCache;
     if (cache == null) return;
-    final stripMetadata =
-        ref.read(shareImageSettingsProvider).stripMetadataForCopyAndDrag;
+    final stripMetadata = ref
+        .read(shareImageSettingsProvider)
+        .effectiveStripMetadataForCopyAndDrag;
     cache.warmUp(stripMetadata: stripMetadata);
   }
 

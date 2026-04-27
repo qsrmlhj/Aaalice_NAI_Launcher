@@ -2,11 +2,16 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../../data/models/gallery/local_image_record.dart';
 import '../../providers/local_gallery_provider.dart';
+import '../../providers/reverse_prompt_provider.dart';
+import '../../router/app_router.dart';
+import '../../services/image_workflow_launcher.dart';
 import '../../providers/selection_mode_provider.dart';
+import '../common/app_toast.dart';
 import '../../widgets/grouped_grid_view.dart';
 import '../../utils/image_detail_opener.dart';
 import 'local_image_card_3d.dart';
@@ -555,6 +560,36 @@ class LocalGalleryContentView extends ConsumerWidget {
           onFavoriteToggle: (data) => ref
               .read(localGalleryNotifierProvider.notifier)
               .toggleFavorite((data as LocalImageDetailData).record.path),
+          onSendToImg2Img: (data) async {
+            try {
+              final bytes = await data.getImageBytes();
+              ImageWorkflowLauncher.openImageToImage(ref, bytes);
+              if (!context.mounted) return;
+              Navigator.of(context).pop();
+              context.go(AppRoutes.home);
+              AppToast.success(context, '图片已发送到图生图');
+            } catch (e) {
+              if (context.mounted) {
+                AppToast.error(context, '发送失败: $e');
+              }
+            }
+          },
+          onSendToReversePrompt: (data) async {
+            try {
+              await ref.read(reversePromptProvider.notifier).addImage(
+                    await data.getImageBytes(),
+                    name: data.fileInfo?.fileName ?? 'gallery-image',
+                  );
+              if (!context.mounted) return;
+              Navigator.of(context).pop();
+              context.go(AppRoutes.home);
+              AppToast.success(context, '图片已发送到反推模块');
+            } catch (e) {
+              if (context.mounted) {
+                AppToast.error(context, '发送失败: $e');
+              }
+            }
+          },
         ),
       );
     }

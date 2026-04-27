@@ -194,7 +194,9 @@ class _DraggableImageCardState extends ConsumerState<DraggableImageCard> {
 
     final item = DragItem(
       suggestedName: fileName,
-      localData: {'source': 'gallery_internal', 'path': filePath},
+      localData: stripMetadata
+          ? {'source': 'gallery_sanitized'}
+          : {'source': 'gallery_internal', 'path': filePath},
     );
 
     if (stripMetadata) {
@@ -313,7 +315,9 @@ class _DragWrapperState extends ConsumerState<_DragWrapper> {
 
     final item = DragItem(
       suggestedName: fileName,
-      localData: {'source': 'gallery_internal', 'path': filePath},
+      localData: stripMetadata
+          ? {'source': 'gallery_sanitized'}
+          : {'source': 'gallery_internal', 'path': filePath},
     );
 
     if (stripMetadata) {
