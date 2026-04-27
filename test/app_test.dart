@@ -1,18 +1,33 @@
-import 'dart:typed_data';
-
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:image/image.dart' as img;
+import 'package:mocktail/mocktail.dart';
 import 'package:nai_launcher/app.dart';
+import 'package:nai_launcher/core/comfyui/builtin_workflows.dart';
 import 'package:nai_launcher/core/comfyui/comfyui_url_utils.dart';
-import 'package:nai_launcher/data/services/local_onnx_upscale_service.dart';
+import 'package:nai_launcher/data/models/fixed_tag/fixed_tag_entry.dart';
+import 'package:nai_launcher/data/services/local_onnx_tagger_service.dart';
+import 'package:nai_launcher/presentation/providers/fixed_tags_provider.dart';
+import 'package:nai_launcher/presentation/providers/generation/image_workflow_controller.dart';
+import 'package:nai_launcher/presentation/providers/share_image_settings_provider.dart';
 import 'package:nai_launcher/presentation/prompt_assistant/models/prompt_assistant_models.dart';
+import 'package:nai_launcher/presentation/prompt_assistant/providers/prompt_assistant_history_provider.dart';
+import 'package:nai_launcher/presentation/prompt_assistant/services/prompt_assistant_api_client.dart';
+import 'package:nai_launcher/presentation/prompt_assistant/services/prompt_assistant_service.dart';
+import 'package:nai_launcher/presentation/utils/dropped_file_reader.dart';
+
+class _MockDio extends Mock implements Dio {}
 
 /// 简单的 Widget 测试示例
 ///
 /// 运行: flutter test test/app_test.dart
 void main() {
+  setUpAll(() {
+    registerFallbackValue(Options());
+    registerFallbackValue(CancelToken());
+  });
+
   group('Widget Tests', () {
     testWidgets('MaterialApp 创建', (tester) async {
       await tester.pumpWidget(
@@ -118,9 +133,130 @@ void main() {
     });
   });
 
+  group('ComfyUI upscale workflows', () {
+    test('includes regular model upscale workflow with Lanczos final resize',
+        () {
+      final workflow = BuiltinWorkflows.all.firstWhere(
+        (workflow) => workflow.id == comfyModelUpscaleTemplateId,
+      );
+
+      expect(workflow.workflowJson['2']['class_type'], 'UpscaleModelLoader');
+      expect(
+        workflow.workflowJson['3']['class_type'],
+        'ImageUpscaleWithModel',
+      );
+      expect(workflow.workflowJson['4']['class_type'], 'ImageScale');
+      expect(
+        workflow.workflowJson['4']['inputs']['upscale_method'],
+        'lanczos',
+      );
+    });
+
+    test('classifies SeedVR2 and regular ComfyUI upscale models', () {
+      expect(
+        isComfySeedvr2UpscaleModel('seedvr2_ema_7b_fp16.safetensors'),
+        isTrue,
+      );
+      expect(
+        isComfySeedvr2UpscaleModel('4x-UltraSharpV2.safetensors'),
+        isFalse,
+      );
+      expect(
+        isComfySeedvr2UpscaleModel('realesrganX4plusAnime_v1.pt'),
+        isFalse,
+      );
+    });
+  });
+
+  group('Dropped file reader URL helpers', () {
+    test('extracts Discord CDN image URLs from HTML payloads', () {
+      final uri = DroppedFileReader.extractImageUriFromText(
+        '<img src="https://media.discordapp.net/attachments/1/2/image.png?ex=abc&amp;is=def">',
+      );
+
+      expect(uri, isNotNull);
+      expect(uri!.host, 'media.discordapp.net');
+      expect(uri.path, '/attachments/1/2/image.png');
+      expect(uri.queryParameters['ex'], 'abc');
+      expect(uri.queryParameters['is'], 'def');
+    });
+
+    test('infers image file names from URL and response headers', () {
+      expect(
+        DroppedFileReader.inferFileNameFromUri(
+          Uri.parse(
+            'https://cdn.discordapp.com/attachments/a/b/sample.webp?ex=1',
+          ),
+        ),
+        'sample.webp',
+      );
+      expect(
+        DroppedFileReader.inferFileNameFromUri(
+          Uri.parse('https://media.discordapp.net/attachments/a/b/image'),
+          contentType: 'image/jpeg',
+        ),
+        'image.jpg',
+      );
+      expect(
+        DroppedFileReader.inferFileNameFromUri(
+          Uri.parse('https://example.test/download'),
+          contentDisposition: 'attachment; filename="discord drop.png"',
+          contentType: 'image/png',
+        ),
+        'discord drop.png',
+      );
+    });
+  });
+
+  group('Protection mode settings', () {
+    test('gates individual protection features behind the master switch', () {
+      const disabled = ShareImageSettings(
+        protectionMode: false,
+        stripMetadataForCopyAndDrag: true,
+        confirmDangerousActions: true,
+        warnExternalImageSend: true,
+        preventOverwrite: true,
+        warnHighAnlasCost: true,
+        highAnlasCostThreshold: 50,
+      );
+
+      expect(disabled.effectiveStripMetadataForCopyAndDrag, isFalse);
+      expect(disabled.effectiveConfirmDangerousActions, isFalse);
+      expect(disabled.effectiveWarnExternalImageSend, isFalse);
+      expect(disabled.effectivePreventOverwrite, isFalse);
+      expect(disabled.effectiveWarnHighAnlasCost, isFalse);
+
+      final enabled = disabled.copyWith(protectionMode: true);
+      expect(enabled.effectiveStripMetadataForCopyAndDrag, isTrue);
+      expect(enabled.effectiveConfirmDangerousActions, isTrue);
+      expect(enabled.effectiveWarnExternalImageSend, isTrue);
+      expect(enabled.effectivePreventOverwrite, isTrue);
+      expect(enabled.effectiveWarnHighAnlasCost, isTrue);
+    });
+
+    test('allows each protection feature to be disabled independently', () {
+      const settings = ShareImageSettings(
+        protectionMode: true,
+        stripMetadataForCopyAndDrag: false,
+        confirmDangerousActions: false,
+        warnExternalImageSend: false,
+        preventOverwrite: false,
+        warnHighAnlasCost: false,
+        highAnlasCostThreshold: 50,
+      );
+
+      expect(settings.effectiveStripMetadataForCopyAndDrag, isFalse);
+      expect(settings.effectiveConfirmDangerousActions, isFalse);
+      expect(settings.effectiveWarnExternalImageSend, isFalse);
+      expect(settings.effectivePreventOverwrite, isFalse);
+      expect(settings.effectiveWarnHighAnlasCost, isFalse);
+    });
+  });
+
   group('Prompt assistant defaults', () {
     test('contains immutable defaults for all assistant task types', () {
       final defaults = PromptAssistantConfigState.defaults();
+      expect(defaults.streamOutput, isFalse);
 
       for (final taskType in AssistantTaskType.values) {
         expect(
@@ -198,6 +334,7 @@ void main() {
           ).encode(),
         );
 
+        expect(decoded.streamOutput, isFalse);
         expect(
           decoded.models.any(
             (model) => model.forTask == AssistantTaskType.reverse,
@@ -232,24 +369,373 @@ void main() {
         );
       },
     );
+
+    test('reuses pulled provider models for reverse and character tasks', () {
+      const providerId = 'openai_custom';
+      const modelName = '[PAY]gemini-3.1-pro-preview';
+      final defaults = PromptAssistantConfigState.defaults();
+      final providers = defaults.providers
+          .map(
+            (provider) => provider.id == providerId
+                ? provider.copyWith(enabled: true)
+                : provider,
+          )
+          .toList();
+
+      final decoded = PromptAssistantConfigState.decode(
+        defaults
+            .copyWith(
+              providers: providers,
+              models: const [
+                ModelConfig(
+                  providerId: providerId,
+                  name: modelName,
+                  displayName: modelName,
+                  forTask: AssistantTaskType.llm,
+                ),
+                ModelConfig(
+                  providerId: providerId,
+                  name: modelName,
+                  displayName: modelName,
+                  forTask: AssistantTaskType.translate,
+                ),
+                ModelConfig(
+                  providerId: providerId,
+                  name: 'default-model',
+                  displayName: 'default-model',
+                  forTask: AssistantTaskType.reverse,
+                  isDefault: true,
+                ),
+                ModelConfig(
+                  providerId: providerId,
+                  name: 'default-model',
+                  displayName: 'default-model',
+                  forTask: AssistantTaskType.characterReplace,
+                  isDefault: true,
+                ),
+              ],
+              routing: const TaskRoutingConfig(
+                llmProviderId: providerId,
+                llmModel: modelName,
+                translateProviderId: providerId,
+                translateModel: modelName,
+                reverseProviderId: providerId,
+                reverseModel: 'default-model',
+                characterReplaceProviderId: providerId,
+                characterReplaceModel: 'default-model',
+              ),
+            )
+            .encode(),
+      );
+
+      for (final taskType in [
+        AssistantTaskType.reverse,
+        AssistantTaskType.characterReplace,
+      ]) {
+        final models = decoded.modelsForProviderTask(
+          providerId: providerId,
+          taskType: taskType,
+        );
+        expect(models.map((model) => model.name), contains(modelName));
+        expect(models.first.name, modelName);
+        expect(decoded.routing.modelFor(taskType), modelName);
+      }
+    });
   });
 
-  group('Local ONNX upscale', () {
-    test('uses Lanczos scaling dimensions for local image upscale', () async {
-      final source = img.Image(width: 2, height: 3);
-      img.fill(source, color: img.ColorRgb8(24, 48, 96));
-      const service = LocalOnnxUpscaleService();
-
-      final result = await service.upscaleLanczos(
-        imageBytes: Uint8List.fromList(img.encodePng(source)),
-        scale: 2,
+  group('Prompt assistant API client', () {
+    test('character replacement payload keeps source prompt as primary input',
+        () {
+      final payload =
+          PromptAssistantService.buildCharacterReplacementUserContent(
+        sourcePrompt: '1girl, sitting, classroom, looking at viewer',
+        characterName: 'target',
+        characterPrompt: 'target girl, silver hair, blue dress',
       );
-      final decoded = img.decodePng(result.bytes);
 
-      expect(result.width, 4);
-      expect(result.height, 6);
-      expect(decoded?.width, 4);
-      expect(decoded?.height, 6);
+      expect(payload, contains('待替换提示词'));
+      expect(payload, contains('1girl, sitting, classroom, looking at viewer'));
+      expect(payload, isNot(contains('源语境标签')));
+      expect(payload, contains('目标角色提示词'));
+      expect(payload, contains('target girl, silver hair, blue dress'));
+      expect(
+        payload.indexOf('1girl, sitting, classroom'),
+        lessThan(payload.indexOf('target girl, silver hair')),
+      );
+      expect(
+        PromptAssistantService.characterReplacementInstruction,
+        contains('不要输出分析'),
+      );
+    });
+
+    test('sends chat requests as non-streaming JSON', () async {
+      final dio = _MockDio();
+      final client = PromptAssistantApiClient(dio: dio);
+
+      when(
+        () => dio.post<dynamic>(
+          any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'),
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer((invocation) async {
+        final payload =
+            Map<String, dynamic>.from(invocation.namedArguments[#data] as Map);
+        final options = invocation.namedArguments[#options] as Options;
+        expect(payload['stream'], isFalse);
+        expect(payload.containsKey('temperature'), isFalse);
+        expect(payload.containsKey('top_p'), isFalse);
+        expect(payload.containsKey('max_tokens'), isFalse);
+        expect(options.responseType, isNot(ResponseType.stream));
+        return Response<dynamic>(
+          data: const {
+            'choices': [
+              {
+                'message': {'content': 'hello'},
+              },
+            ],
+          },
+          requestOptions: RequestOptions(path: '/v1/chat/completions'),
+          statusCode: 200,
+        );
+      });
+
+      final chunks = await client
+          .streamChat(
+            sessionId: 'test',
+            provider: const ProviderConfig(
+              id: 'openai_custom',
+              name: 'OpenAI Compatible',
+              type: ProviderType.openaiCompatible,
+              baseUrl: 'https://example.invalid/v1',
+            ),
+            model: 'model-a',
+            messages: const [
+              {'role': 'user', 'content': 'test'},
+            ],
+            apiKey: 'key',
+          )
+          .toList();
+
+      expect(
+        chunks.where((chunk) => !chunk.done).map((chunk) => chunk.delta).join(),
+        'hello',
+      );
+      expect(chunks.last.done, isTrue);
+    });
+
+    test('throws a visible error when the non-stream response has no content',
+        () async {
+      final dio = _MockDio();
+      final client = PromptAssistantApiClient(dio: dio);
+
+      when(
+        () => dio.post<dynamic>(
+          any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'),
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer(
+        (_) async => Response<dynamic>(
+          data: const {'choices': <Object>[]},
+          requestOptions: RequestOptions(path: '/v1/chat/completions'),
+          statusCode: 200,
+        ),
+      );
+
+      expect(
+        () => client
+            .streamChat(
+              sessionId: 'test',
+              provider: const ProviderConfig(
+                id: 'openai_custom',
+                name: 'OpenAI Compatible',
+                type: ProviderType.openaiCompatible,
+                baseUrl: 'https://example.invalid/v1',
+              ),
+              model: 'model-a',
+              messages: const [
+                {'role': 'user', 'content': 'test'},
+              ],
+              apiKey: 'key',
+            )
+            .drain<void>(),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('retries non-streaming on 400 without sampling params', () async {
+      final dio = _MockDio();
+      final client = PromptAssistantApiClient(dio: dio);
+      var callCount = 0;
+
+      when(
+        () => dio.post<dynamic>(
+          any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'),
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer((invocation) async {
+        callCount++;
+        final payload =
+            Map<String, dynamic>.from(invocation.namedArguments[#data] as Map);
+        expect(payload['stream'], isFalse);
+        if (callCount == 1) {
+          expect(payload.containsKey('temperature'), isFalse);
+          expect(payload.containsKey('top_p'), isFalse);
+          expect(payload.containsKey('max_tokens'), isFalse);
+          throw DioException(
+            requestOptions: RequestOptions(path: '/v1/chat/completions'),
+            response: Response<dynamic>(
+              requestOptions: RequestOptions(path: '/v1/chat/completions'),
+              statusCode: 400,
+            ),
+          );
+        }
+        expect(payload.containsKey('temperature'), isFalse);
+        expect(payload.containsKey('top_p'), isFalse);
+        expect(payload.containsKey('max_tokens'), isFalse);
+        return Response<dynamic>(
+          data: const {
+            'choices': [
+              {
+                'message': {'content': 'fallback result'},
+              },
+            ],
+          },
+          requestOptions: RequestOptions(path: '/v1/chat/completions'),
+          statusCode: 200,
+        );
+      });
+
+      final chunks = await client
+          .streamChat(
+            sessionId: 'test',
+            provider: const ProviderConfig(
+              id: 'openai_custom',
+              name: 'OpenAI Compatible',
+              type: ProviderType.openaiCompatible,
+              baseUrl: 'https://example.invalid/v1',
+            ),
+            model: 'model-a',
+            messages: const [
+              {'role': 'user', 'content': 'test'},
+            ],
+            apiKey: 'key',
+          )
+          .toList();
+
+      expect(
+        chunks.where((chunk) => !chunk.done).map((chunk) => chunk.delta).join(),
+        'fallback result',
+      );
+      expect(chunks.last.done, isTrue);
+      expect(callCount, 2);
+    });
+  });
+
+  group('Prompt assistant fixed tag scope', () {
+    test('strips enabled fixed prefixes and suffixes before assistant tasks',
+        () {
+      final state = FixedTagsState(
+        entries: [
+          FixedTagEntry.create(
+            name: 'quality',
+            content: 'masterpiece, best quality',
+            position: FixedTagPosition.prefix,
+          ),
+          FixedTagEntry.create(
+            name: 'suffix',
+            content: 'highres',
+            position: FixedTagPosition.suffix,
+          ),
+          FixedTagEntry.create(
+            name: 'disabled',
+            content: 'keep_me',
+            enabled: false,
+            position: FixedTagPosition.prefix,
+          ),
+        ],
+      );
+
+      expect(
+        state.stripFromPrompt(
+          'masterpiece, best quality, 1girl, smile, highres',
+        ),
+        '1girl, smile',
+      );
+      expect(state.stripFromPrompt('1girl, smile'), '1girl, smile');
+      expect(
+        state.stripFromPrompt('keep_me, 1girl, highres'),
+        'keep_me, 1girl',
+      );
+    });
+  });
+
+  group('ONNX tagger categories', () {
+    test('keeps only general and character label categories by default', () {
+      expect(
+        const OnnxTaggerLabel(name: '1girl', category: 'General').isGeneral,
+        isTrue,
+      );
+      expect(
+        const OnnxTaggerLabel(name: 'hakurei_reimu', category: 'Character')
+            .isCharacter,
+        isTrue,
+      );
+      expect(
+        const OnnxTaggerLabel(name: '1girl', category: '0').isGeneral,
+        isTrue,
+      );
+      expect(
+        const OnnxTaggerLabel(name: 'hakurei_reimu', category: '4').isCharacter,
+        isTrue,
+      );
+      expect(
+        const OnnxTaggerLabel(name: 'general', category: 'Rating').isRating,
+        isTrue,
+      );
+      expect(
+        const OnnxTaggerLabel(name: 'artist_name', category: 'Artist')
+            .labelCategory,
+        OnnxTaggerLabelCategory.other,
+      );
+    });
+  });
+
+  group('Prompt injected history', () {
+    test('supports external undo and redo for injected prompts', () {
+      final history = PromptAssistantHistoryNotifier();
+      history.recordExternalChange(
+        PromptHistorySessionIds.generationPrompt,
+        before: 'old prompt',
+        after: 'reverse prompt',
+      );
+
+      expect(
+        history.undoExternal(
+          PromptHistorySessionIds.generationPrompt,
+          'reverse prompt',
+        ),
+        'old prompt',
+      );
+      expect(
+        history.redoExternal(
+          PromptHistorySessionIds.generationPrompt,
+          'old prompt',
+        ),
+        'reverse prompt',
+      );
+      expect(
+        history.undoExternal(
+          PromptHistorySessionIds.generationPrompt,
+          'manual edit after injection',
+        ),
+        isNull,
+      );
     });
   });
 }
