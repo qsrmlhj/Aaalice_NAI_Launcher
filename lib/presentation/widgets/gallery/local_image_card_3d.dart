@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -140,15 +139,6 @@ class _LocalImageCard3DState extends ConsumerState<LocalImageCard3D>
         return;
       }
 
-      // 先显示原图，后台生成缩略图
-      // AppLogger.i('[CardLoad] Using original image: $fileName', 'LocalImageCard3D');
-      if (mounted) {
-        setState(() {
-          _displayPath = path;
-          _loadState = _ImageLoadState.loaded;
-        });
-      }
-
       final thumbnailService = ThumbnailService.instance;
       await thumbnailService.initialize();
       thumbnailService.updateVisibility(
@@ -157,24 +147,26 @@ class _LocalImageCard3DState extends ConsumerState<LocalImageCard3D>
         priority: widget.priority,
       );
 
-      // 后台生成缩略图（但不切换到缩略图，避免闪烁）
-      unawaited(
-        thumbnailService
-            .getThumbnail(path,
-                size: ThumbnailSize.small, priority: widget.priority)
-            .then((generatedPath) {
-          if (generatedPath != null && mounted) {
-            final shouldPromoteThumbnail =
-                _displayPath == null || _displayPath == path;
-            setState(() {
-              _thumbnailPath = generatedPath;
-              if (shouldPromoteThumbnail) {
-                _displayPath = generatedPath;
-              }
-            });
-          }
-        }),
+      final generatedPath = await thumbnailService.getThumbnail(
+        path,
+        size: ThumbnailSize.small,
+        priority: widget.priority,
       );
+
+      if (!mounted || widget.record.path != path) return;
+
+      if (generatedPath != null) {
+        setState(() {
+          _thumbnailPath = generatedPath;
+          _displayPath = generatedPath;
+          _loadState = _ImageLoadState.loaded;
+        });
+      } else {
+        setState(() {
+          _displayPath = path;
+          _loadState = _ImageLoadState.loaded;
+        });
+      }
     } catch (e, stack) {
       AppLogger.e('[CardLoad] ERROR: $fileName', e, stack, 'LocalImageCard3D');
       if (mounted) {

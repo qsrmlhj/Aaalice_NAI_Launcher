@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../core/cache/thumbnail_cache_service.dart';
 import '../../core/cache/gallery_cache_manager.dart';
 import '../../core/exceptions/gallery_exceptions.dart';
 import '../../core/utils/app_logger.dart';
@@ -15,6 +16,7 @@ import '../../data/services/gallery/gallery_filter_service.dart';
 import '../../data/services/gallery/gallery_stream_scanner.dart';
 import '../../data/services/gallery/scan_state_manager.dart';
 import '../../data/services/gallery/unified_gallery_service.dart';
+import '../../data/services/thumbnail_service.dart';
 
 part 'local_gallery_provider.freezed.dart';
 part 'local_gallery_provider.g.dart';
@@ -295,30 +297,55 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
       return;
     }
 
+    final requestedPage = page < 0 ? 0 : page;
+
     if (showLoading) {
-      _setState(state.copyWith(isLoading: true, currentPage: page));
+      _setState(state.copyWith(isLoading: true, currentPage: requestedPage));
     }
 
     try {
       final service = await getService();
-      final records = await service.getPage(page, pageSize: state.pageSize);
 
       // 计算总页数
       final totalItems = state.filterCriteria.hasFilters
           ? service.filteredCount
           : service.totalCount;
       final totalPages = (totalItems / state.pageSize).ceil();
+      final maxPage = totalPages > 0 ? totalPages - 1 : 0;
+      var normalizedPage = requestedPage > maxPage ? maxPage : requestedPage;
+
+      var records =
+          await service.getPage(normalizedPage, pageSize: state.pageSize);
+
+      // 防御性兜底：如果页码在边界变化后落入空页，自动回退到末页。
+      if (records.isEmpty && normalizedPage > 0 && totalPages > 0) {
+        final fallbackPage = totalPages - 1;
+        if (fallbackPage != normalizedPage) {
+          final fallbackRecords =
+              await service.getPage(fallbackPage, pageSize: state.pageSize);
+          if (fallbackRecords.isNotEmpty) {
+            normalizedPage = fallbackPage;
+            records = fallbackRecords;
+          }
+        }
+      }
 
       _setState(
         state.copyWith(
           currentImages: records,
-          currentPage: page,
+          currentPage: normalizedPage,
           totalPages: totalPages,
           filteredCount: service.filteredCount,
           totalCount: service.totalCount,
           isLoading: false,
           isPageLoading: false,
         ),
+      );
+      _preloadAdjacentPageThumbnails(
+        service,
+        normalizedPage,
+        state.pageSize,
+        totalPages,
       );
     } on GalleryNotInitializedException {
       _setState(
@@ -347,6 +374,43 @@ class LocalGalleryNotifier extends _$LocalGalleryNotifier {
         ),
       );
     }
+  }
+
+  void _preloadAdjacentPageThumbnails(
+    LocalGalleryService service,
+    int page,
+    int pageSize,
+    int totalPages,
+  ) {
+    final pagesToPreload = <int>{
+      if (page + 1 < totalPages) page + 1,
+      if (page > 0) page - 1,
+    };
+    if (pagesToPreload.isEmpty) return;
+
+    unawaited(
+      () async {
+        final thumbnailService = ThumbnailService.instance;
+        await thumbnailService.initialize();
+
+        for (final targetPage in pagesToPreload) {
+          final records = await service.getPage(targetPage, pageSize: pageSize);
+          for (final record in records) {
+            thumbnailService.preloadThumbnail(
+              record.path,
+              size: ThumbnailSize.small,
+              priority: ThumbnailPriority.low,
+            );
+          }
+        }
+      }()
+          .catchError((Object error, StackTrace stack) {
+        AppLogger.w(
+          'Adjacent thumbnail preload failed: $error',
+          'LocalGalleryNotifier',
+        );
+      }),
+    );
   }
 
   /// 加载下一页
