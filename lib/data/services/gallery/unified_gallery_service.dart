@@ -175,10 +175,8 @@ class LocalGalleryServiceImpl implements LocalGalleryService {
   int get filteredCount =>
       _currentFilter.hasFilters ? _filteredFiles.length : totalCount;
 
-  int _dbImageCount = 0;
-
   @override
-  int get totalCount => _dbImageCount > 0 ? _dbImageCount : _allFiles.length;
+  int get totalCount => _allFiles.length;
 
   @override
   FilterCriteria get currentFilter => _currentFilter;
@@ -216,8 +214,6 @@ class LocalGalleryServiceImpl implements LocalGalleryService {
       final files = await _getAllImageFiles();
       _allFiles = files;
 
-      // 1.5 同时获取数据库计数（用于统一统计显示）
-      _dbImageCount = await _dataSource.countImages();
       _filteredFiles = files;
 
       AppLogger.i(
@@ -940,10 +936,7 @@ class LocalGalleryServiceImpl implements LocalGalleryService {
       // 3. 添加到 _allFiles 列表开头（因为是新文件，修改时间最新）
       _allFiles.insert(0, file);
 
-      // 4. 更新数据库计数
-      _dbImageCount = await _dataSource.countImages();
-
-      // 5. 重新应用过滤（如果有过滤条件）
+      // 4. 重新应用过滤（如果有过滤条件）
       if (_currentFilter.hasFilters) {
         await applyFilter(_currentFilter);
       } else {
@@ -980,9 +973,6 @@ class LocalGalleryServiceImpl implements LocalGalleryService {
 
     try {
       final files = await _getAllImageFiles();
-
-      // 更新数据库计数
-      _dbImageCount = await _dataSource.countImages();
 
       // ✅ 检查文件数量是否变化（可能由于扩展名修复导致）
       final previousCount = _allFiles.length;

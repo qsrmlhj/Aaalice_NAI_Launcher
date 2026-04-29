@@ -2,8 +2,6 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
-import '../../data/models/image/resolution_preset.dart';
-
 /// NovelAI 分辨率适配器
 ///
 /// 将任意尺寸图像缩放到最接近的 NovelAI 兼容分辨率（64 的倍数），
@@ -19,9 +17,9 @@ class NaiResolutionAdapter {
   /// 找到最接近的 NAI 兼容分辨率
   ///
   /// 策略：
-  ///   1. 先检查是否精确匹配某个预设分辨率 → 直接返回
+  ///   1. 先检查是否已经是 64 倍数 → 直接返回
   ///   2. 将宽高分别舍入到最近的 64 倍数
-  ///   3. 在 4 种组合（floor/ceil × floor/ceil）中选缩放比例最接近 1.0 的
+  ///   3. 在 4 种组合（floor/ceil × floor/ceil）中选面积变化和宽高比偏移最小的
   ///   4. 保证结果 >= 64 且 <= 4096
   static ({int width, int height, double scaleFactor}) findClosestResolution(
     int sourceWidth,
@@ -29,22 +27,6 @@ class NaiResolutionAdapter {
   ) {
     if (isCompatible(sourceWidth, sourceHeight)) {
       return (width: sourceWidth, height: sourceHeight, scaleFactor: 1.0);
-    }
-
-    // 先尝试匹配预设分辨率（找面积最接近的同比例预设）
-    final presetMatch =
-        _findClosestPreset(sourceWidth, sourceHeight);
-    if (presetMatch != null) {
-      final scale = _combinedScale(
-        sourceWidth, sourceHeight, presetMatch.width, presetMatch.height,
-      );
-      if (scale > 0.9 && scale < 1.15) {
-        return (
-          width: presetMatch.width,
-          height: presetMatch.height,
-          scaleFactor: scale,
-        );
-      }
     }
 
     // 对宽高分别做 floor/ceil 到 64 倍数，取最优组合
@@ -148,37 +130,14 @@ class NaiResolutionAdapter {
   }
 
   static double _combinedScale(
-    int srcW, int srcH, int dstW, int dstH,
+    int srcW,
+    int srcH,
+    int dstW,
+    int dstH,
   ) {
     final scaleW = dstW / srcW;
     final scaleH = dstH / srcH;
     return (scaleW + scaleH) / 2.0;
-  }
-
-  /// 在预设列表中找宽高比最接近、面积差最小的预设
-  static ResolutionPreset? _findClosestPreset(int srcW, int srcH) {
-    final srcAr = srcW / srcH;
-    ResolutionPreset? best;
-    var bestScore = double.infinity;
-
-    for (final preset in ResolutionPreset.presets) {
-      if (preset.width == 0 || preset.height == 0) continue;
-
-      final presetAr = preset.width / preset.height;
-      final arDiff = (srcAr - presetAr).abs();
-      if (arDiff > 0.15) continue;
-
-      final areaDiff =
-          ((preset.width * preset.height) - (srcW * srcH)).abs().toDouble();
-      final score = arDiff * 1e6 + areaDiff;
-
-      if (score < bestScore) {
-        bestScore = score;
-        best = preset;
-      }
-    }
-
-    return best;
   }
 }
 
