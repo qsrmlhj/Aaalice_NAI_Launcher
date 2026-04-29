@@ -8,6 +8,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/constants/api_constants.dart';
 import '../../../core/network/dio_client.dart';
+import '../../../core/network/nai_api_endpoint_service.dart';
 import '../../../core/utils/app_logger.dart';
 import '../../../core/utils/zip_utils.dart';
 
@@ -16,8 +17,12 @@ part 'nai_image_enhancement_api_service.g.dart';
 /// NovelAI Image Enhancement API 服务
 class NAIImageEnhancementApiService {
   final Dio _dio;
+  final NaiApiEndpointService _endpointService;
 
-  NAIImageEnhancementApiService(this._dio);
+  NAIImageEnhancementApiService(
+    this._dio, [
+    NaiApiEndpointService? endpointService,
+  ]) : _endpointService = endpointService ?? NaiApiEndpointService();
 
   // ==================== 图像增强类型常量 ====================
   static const String _reqTypeEmotion = 'emotion';
@@ -48,7 +53,7 @@ class NAIImageEnhancementApiService {
       }
 
       final response = await _dio.post(
-        '${ApiConstants.baseUrl}${ApiConstants.upscaleEndpoint}',
+        _endpointService.mainUrl(ApiConstants.upscaleEndpoint),
         data: {
           'image': base64Encode(image),
           'scale': scale,
@@ -80,7 +85,7 @@ class NAIImageEnhancementApiService {
   }) async {
     try {
       final response = await _dio.post(
-        '${ApiConstants.imageBaseUrl}${ApiConstants.encodeVibeEndpoint}',
+        _endpointService.imageUrl(ApiConstants.encodeVibeEndpoint),
         data: {
           'image': base64Encode(image),
           'model': model,
@@ -119,7 +124,7 @@ class NAIImageEnhancementApiService {
       };
 
       final response = await _dio.post(
-        '${ApiConstants.imageBaseUrl}${ApiConstants.augmentImageEndpoint}',
+        _endpointService.imageUrl(ApiConstants.augmentImageEndpoint),
         data: requestData,
         options: Options(
           responseType: ResponseType.bytes,
@@ -182,7 +187,7 @@ class NAIImageEnhancementApiService {
   }) async {
     try {
       final response = await _dio.post(
-        '${ApiConstants.imageBaseUrl}${ApiConstants.annotateImageEndpoint}',
+        _endpointService.imageUrl(ApiConstants.annotateImageEndpoint),
         data: {
           'image': base64Encode(image),
           'req_type': annotateType,
@@ -259,5 +264,6 @@ class NAIImageEnhancementApiService {
 @riverpod
 NAIImageEnhancementApiService naiImageEnhancementApiService(Ref ref) {
   final dio = ref.watch(dioClientProvider);
-  return NAIImageEnhancementApiService(dio);
+  final endpointService = ref.watch(naiApiEndpointServiceProvider);
+  return NAIImageEnhancementApiService(dio, endpointService);
 }
