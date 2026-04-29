@@ -22,11 +22,98 @@ enum ImageWorkflowMode {
 
 enum UpscaleBackend { comfyui, novelai }
 
+enum ComfyUpscaleModule { regular, seedvr2, rtx }
+
 const String comfySeedvr2UpscaleTemplateId = 'builtin_seedvr2_upscale';
+const String comfySeedvr2TiledUpscaleTemplateId =
+    'builtin_seedvr2_tiled_upscale';
 const String comfyModelUpscaleTemplateId = 'builtin_comfy_model_upscale';
+const String comfyRtxUpscaleTemplateId = 'builtin_rtx_upscale';
 
 bool isComfySeedvr2UpscaleModel(String model) {
   return model.trim().toLowerCase().contains('seedvr2');
+}
+
+List<String> filterComfyUpscaleModelsForModule(
+  Iterable<String> availableModels, {
+  required ComfyUpscaleModule module,
+}) {
+  final normalizedModels = availableModels
+      .map((model) => model.trim())
+      .where((model) => model.isNotEmpty)
+      .toList(growable: false);
+
+  return switch (module) {
+    ComfyUpscaleModule.seedvr2 => normalizedModels
+        .where(isComfySeedvr2UpscaleModel)
+        .toList(growable: false),
+    ComfyUpscaleModule.regular => normalizedModels
+        .where((model) => !isComfySeedvr2UpscaleModel(model))
+        .toList(growable: false),
+    ComfyUpscaleModule.rtx => const [],
+  };
+}
+
+String? resolveComfyUpscaleModelForModule(
+  Iterable<String> availableModels, {
+  required ComfyUpscaleModule module,
+  required String currentModel,
+}) {
+  if (module == ComfyUpscaleModule.rtx) return null;
+
+  final modelsForModule = filterComfyUpscaleModelsForModule(
+    availableModels,
+    module: module,
+  );
+  if (modelsForModule.isNotEmpty) {
+    return selectPreferredUpscaleModel(
+      modelsForModule,
+      currentModel: currentModel,
+    );
+  }
+
+  final trimmedCurrent = currentModel.trim();
+  if (trimmedCurrent.isEmpty) return null;
+  final currentIsSeedvr2 = isComfySeedvr2UpscaleModel(trimmedCurrent);
+  return switch (module) {
+    ComfyUpscaleModule.seedvr2 when currentIsSeedvr2 => trimmedCurrent,
+    ComfyUpscaleModule.regular when !currentIsSeedvr2 => trimmedCurrent,
+    _ => null,
+  };
+}
+
+int calculateComfySeedvr2TargetResolution({
+  required int sourceWidth,
+  required int sourceHeight,
+  required double scale,
+}) {
+  final shortestSide = sourceWidth < sourceHeight ? sourceWidth : sourceHeight;
+  final safeShortestSide = shortestSide < 1 ? 1 : shortestSide;
+  final safeScale = scale
+      .clamp(
+        UpscaleWorkflowSettings.minScale,
+        UpscaleWorkflowSettings.maxScale,
+      )
+      .toDouble();
+  final resolution = (safeShortestSide * safeScale).round();
+  return resolution.clamp(1, 16384).toInt();
+}
+
+int calculateComfySeedvr2TiledTargetResolution({
+  required int sourceWidth,
+  required int sourceHeight,
+  required double scale,
+}) {
+  final longestSide = sourceWidth > sourceHeight ? sourceWidth : sourceHeight;
+  final safeLongestSide = longestSide < 16 ? 16 : longestSide;
+  final safeScale = scale
+      .clamp(
+        UpscaleWorkflowSettings.minScale,
+        UpscaleWorkflowSettings.maxScale,
+      )
+      .toDouble();
+  final resolution = (safeLongestSide * safeScale).round();
+  return resolution.clamp(16, 16384).toInt();
 }
 
 String selectPreferredUpscaleModel(
@@ -59,34 +146,70 @@ String selectPreferredUpscaleModel(
   return normalizedModels.first;
 }
 
+bool shouldAutoPersistResolvedUpscaleModel({
+  required bool isComfyBackend,
+  required bool hasFetchedFromServer,
+  required Iterable<String> availableModels,
+  required String currentModel,
+  required String resolvedModel,
+}) {
+  if (!isComfyBackend || !hasFetchedFromServer) return false;
+  if (availableModels.isEmpty) return false;
+  return resolvedModel != currentModel;
+}
+
 /// 图生图「超分」子模式设置
 class UpscaleWorkflowSettings {
   const UpscaleWorkflowSettings({
     this.backend = defaultBackend,
+    this.comfyModule = defaultComfyModule,
     this.comfyScale = defaultComfyScale,
     this.comfyModel = defaultComfyModel,
+    this.seedvr2VaeTileSize = defaultSeedvr2VaeTileSize,
+    this.seedvr2Tiled = false,
+    this.seedvr2TileSize = defaultSeedvr2TileSize,
   });
 
   static const UpscaleBackend defaultBackend = UpscaleBackend.comfyui;
+  static const ComfyUpscaleModule defaultComfyModule =
+      ComfyUpscaleModule.seedvr2;
   static const double defaultComfyScale = 1.5;
   static const String defaultComfyModel = 'seedvr2_ema_3b_q4.safetensors';
+  static const int defaultSeedvr2VaeTileSize = 1024;
+  static const int defaultSeedvr2TileSize = 1024;
 
   final UpscaleBackend backend;
+  final ComfyUpscaleModule comfyModule;
   final double comfyScale;
   final String comfyModel;
+  final int seedvr2VaeTileSize;
+  final bool seedvr2Tiled;
+  final int seedvr2TileSize;
 
   static const double minScale = 1.0;
   static const double maxScale = 2.0;
+  static const int minSeedvr2VaeTileSize = 128;
+  static const int maxSeedvr2VaeTileSize = 4096;
+  static const int minSeedvr2TileSize = 256;
+  static const int maxSeedvr2TileSize = 4096;
 
   UpscaleWorkflowSettings copyWith({
     UpscaleBackend? backend,
+    ComfyUpscaleModule? comfyModule,
     double? comfyScale,
     String? comfyModel,
+    int? seedvr2VaeTileSize,
+    bool? seedvr2Tiled,
+    int? seedvr2TileSize,
   }) {
     return UpscaleWorkflowSettings(
       backend: backend ?? this.backend,
+      comfyModule: comfyModule ?? this.comfyModule,
       comfyScale: comfyScale ?? this.comfyScale,
       comfyModel: comfyModel ?? this.comfyModel,
+      seedvr2VaeTileSize: seedvr2VaeTileSize ?? this.seedvr2VaeTileSize,
+      seedvr2Tiled: seedvr2Tiled ?? this.seedvr2Tiled,
+      seedvr2TileSize: seedvr2TileSize ?? this.seedvr2TileSize,
     );
   }
 }
@@ -230,14 +353,38 @@ class ImageWorkflowController extends Notifier<ImageWorkflowState> {
         ) ??
         UpscaleWorkflowSettings.defaultComfyModel;
     final persistedBackend = _readPersistedUpscaleBackend();
+    final persistedComfyModule = _readPersistedComfyUpscaleModule(
+      fallbackModel: persistedModel,
+    );
+    final persistedSeedvr2VaeTileSize = _readPersistedIntSetting(
+      StorageKeys.comfyuiSeedvr2VaeTileSize,
+      defaultValue: UpscaleWorkflowSettings.defaultSeedvr2VaeTileSize,
+      min: UpscaleWorkflowSettings.minSeedvr2VaeTileSize,
+      max: UpscaleWorkflowSettings.maxSeedvr2VaeTileSize,
+    );
+    final persistedSeedvr2Tiled = _storage.getSetting<bool>(
+          StorageKeys.comfyuiSeedvr2Tiled,
+          defaultValue: false,
+        ) ??
+        false;
+    final persistedSeedvr2TileSize = _readPersistedIntSetting(
+      StorageKeys.comfyuiSeedvr2TileSize,
+      defaultValue: UpscaleWorkflowSettings.defaultSeedvr2TileSize,
+      min: UpscaleWorkflowSettings.minSeedvr2TileSize,
+      max: UpscaleWorkflowSettings.maxSeedvr2TileSize,
+    );
     final persistedEnhance = _readPersistedEnhanceSettings();
 
     return _buildDefaultState(
       enhance: persistedEnhance,
       upscale: UpscaleWorkflowSettings(
         backend: persistedBackend,
+        comfyModule: persistedComfyModule,
         comfyScale: persistedScale,
         comfyModel: persistedModel,
+        seedvr2VaeTileSize: persistedSeedvr2VaeTileSize,
+        seedvr2Tiled: persistedSeedvr2Tiled,
+        seedvr2TileSize: persistedSeedvr2TileSize,
       ),
     );
   }
@@ -276,6 +423,39 @@ class ImageWorkflowController extends Notifier<ImageWorkflowState> {
       }
     }
     return UpscaleWorkflowSettings.defaultBackend;
+  }
+
+  ComfyUpscaleModule _readPersistedComfyUpscaleModule({
+    required String fallbackModel,
+  }) {
+    final rawValue = _storage.getSetting<String>(
+      StorageKeys.comfyuiUpscaleModule,
+      defaultValue: null,
+    );
+    for (final module in ComfyUpscaleModule.values) {
+      if (module.name == rawValue) {
+        return module;
+      }
+    }
+    return isComfySeedvr2UpscaleModel(fallbackModel)
+        ? ComfyUpscaleModule.seedvr2
+        : ComfyUpscaleModule.regular;
+  }
+
+  int _readPersistedIntSetting(
+    String key, {
+    required int defaultValue,
+    required int min,
+    required int max,
+  }) {
+    final rawValue = _storage.getSetting(key);
+    final intValue = switch (rawValue) {
+      final int value => value,
+      final double value => value.round(),
+      final String value => int.tryParse(value) ?? defaultValue,
+      _ => defaultValue,
+    };
+    return intValue.clamp(min, max).toInt();
   }
 
   EnhanceWorkflowSettings _readPersistedEnhanceSettings() {
@@ -330,6 +510,30 @@ class ImageWorkflowController extends Notifier<ImageWorkflowState> {
       _storage.setSetting(
         StorageKeys.comfyuiUpscaleBackend,
         settings.backend.name,
+      ),
+    );
+    unawaited(
+      _storage.setSetting(
+        StorageKeys.comfyuiUpscaleModule,
+        settings.comfyModule.name,
+      ),
+    );
+    unawaited(
+      _storage.setSetting(
+        StorageKeys.comfyuiSeedvr2VaeTileSize,
+        settings.seedvr2VaeTileSize,
+      ),
+    );
+    unawaited(
+      _storage.setSetting(
+        StorageKeys.comfyuiSeedvr2Tiled,
+        settings.seedvr2Tiled,
+      ),
+    );
+    unawaited(
+      _storage.setSetting(
+        StorageKeys.comfyuiSeedvr2TileSize,
+        settings.seedvr2TileSize,
       ),
     );
   }
@@ -523,8 +727,48 @@ class ImageWorkflowController extends Notifier<ImageWorkflowState> {
     _persistUpscaleSettings(nextSettings);
   }
 
+  void updateComfyUpscaleModule(ComfyUpscaleModule module) {
+    final nextSettings = state.upscale.copyWith(comfyModule: module);
+    state = state.copyWith(upscale: nextSettings);
+    _persistUpscaleSettings(nextSettings);
+  }
+
   void updateUpscaleBackend(UpscaleBackend backend) {
     final nextSettings = state.upscale.copyWith(backend: backend);
+    state = state.copyWith(upscale: nextSettings);
+    _persistUpscaleSettings(nextSettings);
+  }
+
+  void updateSeedvr2VaeTileSize(double value) {
+    final nextSettings = state.upscale.copyWith(
+      seedvr2VaeTileSize: value
+          .round()
+          .clamp(
+            UpscaleWorkflowSettings.minSeedvr2VaeTileSize,
+            UpscaleWorkflowSettings.maxSeedvr2VaeTileSize,
+          )
+          .toInt(),
+    );
+    state = state.copyWith(upscale: nextSettings);
+    _persistUpscaleSettings(nextSettings);
+  }
+
+  void updateSeedvr2Tiled(bool value) {
+    final nextSettings = state.upscale.copyWith(seedvr2Tiled: value);
+    state = state.copyWith(upscale: nextSettings);
+    _persistUpscaleSettings(nextSettings);
+  }
+
+  void updateSeedvr2TileSize(double value) {
+    final nextSettings = state.upscale.copyWith(
+      seedvr2TileSize: value
+          .round()
+          .clamp(
+            UpscaleWorkflowSettings.minSeedvr2TileSize,
+            UpscaleWorkflowSettings.maxSeedvr2TileSize,
+          )
+          .toInt(),
+    );
     state = state.copyWith(upscale: nextSettings);
     _persistUpscaleSettings(nextSettings);
   }

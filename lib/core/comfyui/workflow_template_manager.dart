@@ -8,6 +8,7 @@ import '../utils/app_logger.dart';
 import 'comfyui_api_service.dart';
 import 'workflow_template.dart';
 import 'builtin_workflows.dart';
+import 'workflow_node_validator.dart';
 
 /// 工作流模板管理器
 ///
@@ -60,7 +61,10 @@ class WorkflowTemplateManager {
     _templates.removeWhere((t) => t.id == template.id);
     _templates.add(template);
     await _saveCustomTemplate(template);
-    AppLogger.i('Added custom workflow: ${template.name} (${template.id})', _tag);
+    AppLogger.i(
+      'Added custom workflow: ${template.name} (${template.id})',
+      _tag,
+    );
   }
 
   /// 删除用户自定义模板
@@ -115,6 +119,23 @@ class WorkflowTemplateManager {
     return workflow;
   }
 
+  /// 校验当前 ComfyUI 是否已注册 workflow 中所有节点类型。
+  Future<void> validateWorkflowNodeTypes({
+    required ComfyUIApiService api,
+    required Map<String, dynamic> workflow,
+  }) async {
+    final objectInfo = await api.getObjectInfo();
+    final missingNodeTypes = findMissingWorkflowNodeTypes(
+      workflow: workflow,
+      objectInfo: objectInfo,
+    );
+    if (missingNodeTypes.isNotEmpty) {
+      throw ComfyUIApiException(
+        formatMissingWorkflowNodeTypesMessage(missingNodeTypes),
+      );
+    }
+  }
+
   /// 上传输入图像并返回 {slotId: uploadedFilename}
   Future<Map<String, String>> uploadInputImages({
     required ComfyUIApiService api,
@@ -132,7 +153,12 @@ class WorkflowTemplateManager {
         continue;
       }
 
-      final filename = 'nai_launcher_${slot.id}_${DateTime.now().millisecondsSinceEpoch}.png';
+      final filename =
+          'nai_launcher_${slot.id}_${DateTime.now().millisecondsSinceEpoch}.png';
+      AppLogger.d(
+        'Uploading ${slot.id}: bytes=${data.length}, filename=$filename',
+        _tag,
+      );
       final uploaded = await api.uploadImage(
         imageBytes: data,
         filename: filename,
@@ -207,7 +233,10 @@ class WorkflowTemplateManager {
           );
           _templates.add(template);
         } catch (e) {
-          AppLogger.w('Failed to load custom workflow from ${file.path}: $e', _tag);
+          AppLogger.w(
+            'Failed to load custom workflow from ${file.path}: $e',
+            _tag,
+          );
         }
       }
     } catch (e) {

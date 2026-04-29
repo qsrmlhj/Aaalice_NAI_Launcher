@@ -165,6 +165,16 @@ class ComfyUIWorkflows extends _$ComfyUIWorkflows {
 class ComfyUITask extends _$ComfyUITask {
   static const String _tag = 'ComfyUI-Task';
 
+  static String _summarizeInputImages(Map<String, Uint8List> images) {
+    return images.entries
+        .map((entry) => '${entry.key}:${entry.value.length}')
+        .join(', ');
+  }
+
+  static String _summarizeOutputImages(List<Uint8List> images) {
+    return 'count=${images.length}, bytes=[${images.map((i) => i.length).join(', ')}]';
+  }
+
   @override
   ComfyUITaskState build() => const ComfyUITaskState();
 
@@ -183,10 +193,22 @@ class ComfyUITask extends _$ComfyUITask {
     final workflows = ref.read(comfyUIWorkflowsProvider.notifier);
     final manager = workflows.manager;
 
+    AppLogger.i(
+      'Execute requested: template=$templateId, connection=$connStatus, '
+      'inputs=[${_summarizeInputImages(inputImages)}], '
+      'paramKeys=[${paramValues.keys.join(', ')}]',
+      _tag,
+    );
+
     // 确保已连接
     if (connStatus != ComfyUIConnectionStatus.connected) {
+      AppLogger.d(
+        'Connection not ready ($connStatus); connecting before execute',
+        _tag,
+      );
       final ok = await connNotifier.connect();
       if (!ok) {
+        AppLogger.w('Connection attempt failed before execute', _tag);
         state = state.copyWith(
           status: ComfyUITaskStatus.failed,
           errorMessage: '无法连接到 ComfyUI 服务器',
@@ -197,6 +219,11 @@ class ComfyUITask extends _$ComfyUITask {
 
     final conn = connNotifier.manager;
     if (conn?.api == null || conn?.ws == null) {
+      AppLogger.w(
+        'Connection manager unavailable: hasApi=${conn?.api != null}, '
+        'hasWs=${conn?.ws != null}',
+        _tag,
+      );
       state = state.copyWith(
         status: ComfyUITaskStatus.failed,
         errorMessage: 'ComfyUI 连接不可用',
@@ -206,6 +233,7 @@ class ComfyUITask extends _$ComfyUITask {
 
     final template = manager.getById(templateId);
     if (template == null) {
+      AppLogger.w('Workflow template not found: $templateId', _tag);
       state = state.copyWith(
         status: ComfyUITaskStatus.failed,
         errorMessage: '未找到工作流模板: $templateId',
@@ -219,10 +247,15 @@ class ComfyUITask extends _$ComfyUITask {
 
       // 1. 上传图像
       state = state.copyWith(status: ComfyUITaskStatus.uploading, progress: 0);
+      AppLogger.d('Uploading inputs for template=$templateId', _tag);
       final uploadedFiles = await manager.uploadInputImages(
         api: conn!.api!,
         template: template,
         imageData: inputImages,
+      );
+      AppLogger.d(
+        'Inputs uploaded for template=$templateId: $uploadedFiles',
+        _tag,
       );
 
       // 2. 处理种子：-1 表示随机
@@ -237,39 +270,67 @@ class ComfyUITask extends _$ComfyUITask {
       }
 
       // 3. 构建可执行工作流
+      AppLogger.d('Building workflow for template=$templateId', _tag);
       final workflow = manager.buildExecutableWorkflow(
         template: template,
         paramValues: effectiveParams,
         uploadedFiles: uploadedFiles,
       );
+      AppLogger.d(
+          'Validating workflow node types for template=$templateId', _tag);
+      await manager.validateWorkflowNodeTypes(
+        api: conn.api!,
+        workflow: workflow,
+      );
+      AppLogger.d(
+          'Workflow node validation passed: template=$templateId', _tag);
 
       // 4. 提交工作流
       state = state.copyWith(status: ComfyUITaskStatus.queued);
+      AppLogger.i(
+        'Queue prompt start: template=$templateId, clientId=${conn.clientId}',
+        _tag,
+      );
       final result = await conn.api!.queuePrompt(
         workflow: workflow,
         clientId: conn.clientId,
       );
       state = state.copyWith(promptId: result.promptId);
       conn.ws!.trackPrompt(result.promptId);
+      AppLogger.i(
+        'Queue prompt returned: template=$templateId, '
+        'promptId=${result.promptId}, '
+        'webSocketOutput=${template.usesWebSocketOutput}',
+        _tag,
+      );
 
       // 5. 等待完成
       state = state.copyWith(status: ComfyUITaskStatus.running);
 
-      if (template.usesWebSocketOutput) {
-        return await _waitForWebSocketResult(
-          conn,
-          result.promptId,
-          outputNodeIds,
-        );
-      } else {
-        return await _waitForHttpResult(
-          conn,
-          result.promptId,
-          outputNodeIds,
-        );
-      }
-    } catch (e) {
-      AppLogger.e('Task execution failed: $e', _tag);
+      final images = template.usesWebSocketOutput
+          ? await _waitForWebSocketResult(
+              conn,
+              result.promptId,
+              outputNodeIds,
+            )
+          : await _waitForHttpResult(
+              conn,
+              result.promptId,
+              outputNodeIds,
+            );
+      AppLogger.i(
+        'Workflow result collected: template=$templateId, '
+        'promptId=${result.promptId}, ${_summarizeOutputImages(images)}',
+        _tag,
+      );
+      return images;
+    } catch (e, stackTrace) {
+      AppLogger.e(
+        'Task execution failed: template=$templateId',
+        e,
+        stackTrace,
+        _tag,
+      );
       state = state.copyWith(
         status: ComfyUITaskStatus.failed,
         errorMessage: e.toString(),
@@ -429,6 +490,8 @@ class ComfyUISeedvr2Models extends _$ComfyUISeedvr2Models {
   static const _fallback = ['seedvr2_ema_7b_fp16.safetensors'];
   bool _isFetching = false;
   bool _hasFetchedFromServer = false;
+
+  bool get hasFetchedFromServer => _hasFetchedFromServer;
 
   @override
   List<String> build() {

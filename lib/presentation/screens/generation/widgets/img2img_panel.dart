@@ -10,6 +10,7 @@ import 'package:image/image.dart' as img;
 import '../../../../core/comfyui/comfyui_models.dart';
 import '../../../../core/comfyui/workflow_template.dart';
 import '../../../../core/utils/focused_inpaint_utils.dart';
+import '../../../../core/utils/app_logger.dart';
 import '../../../../core/utils/localization_extension.dart';
 import '../../../../data/datasources/remote/nai_image_enhancement_api_service.dart';
 import '../../../../data/models/image/image_params.dart';
@@ -39,6 +40,8 @@ class Img2ImgPanel extends ConsumerStatefulWidget {
 }
 
 class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
+  static const String _upscaleLogTag = 'Img2Img-Upscale';
+
   bool _naiUpscaling = false;
 
   @override
@@ -607,17 +610,31 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     final upscale = workflow.upscale;
     final isNai = upscale.backend == UpscaleBackend.novelai;
     final isComfy = upscale.backend == UpscaleBackend.comfyui;
+    final comfyModule = upscale.comfyModule;
 
     final availableModels = ref.watch(comfyUISeedvr2ModelsProvider);
-    final resolvedComfyModel = selectPreferredUpscaleModel(
+    final moduleModels = filterComfyUpscaleModelsForModule(
       availableModels,
+      module: comfyModule,
+    );
+    final modelsFetchedFromServer =
+        ref.read(comfyUISeedvr2ModelsProvider.notifier).hasFetchedFromServer;
+    final resolvedComfyModel = resolveComfyUpscaleModelForModule(
+      availableModels,
+      module: comfyModule,
       currentModel: upscale.comfyModel,
     );
-    final isComfySeedvr2 = isComfySeedvr2UpscaleModel(resolvedComfyModel);
+    final isComfySeedvr2 = comfyModule == ComfyUpscaleModule.seedvr2;
+    final isComfyRtx = comfyModule == ComfyUpscaleModule.rtx;
 
-    if (isComfy &&
-        availableModels.isNotEmpty &&
-        resolvedComfyModel != upscale.comfyModel) {
+    if (resolvedComfyModel != null &&
+        shouldAutoPersistResolvedUpscaleModel(
+          isComfyBackend: isComfy,
+          hasFetchedFromServer: modelsFetchedFromServer,
+          availableModels: moduleModels,
+          currentModel: upscale.comfyModel,
+          resolvedModel: resolvedComfyModel,
+        )) {
       Future.microtask(
         () => controller.updateUpscaleComfyModel(resolvedComfyModel),
       );
@@ -627,7 +644,11 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     if (isNai) {
       canStart = hasSourceImage && !_naiUpscaling;
     } else {
-      canStart = comfyEnabled && hasSourceImage && !taskState.isRunning;
+      final hasRequiredComfyModel = isComfyRtx || resolvedComfyModel != null;
+      canStart = comfyEnabled &&
+          hasSourceImage &&
+          !taskState.isRunning &&
+          hasRequiredComfyModel;
     }
 
     return Container(
@@ -688,67 +709,129 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
               )
             else ...[
               Text(
-                '超分模型',
+                '放大方式',
                 style:
                     theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
               ),
               const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                key: ValueKey('upscale_model_${availableModels.length}'),
-                initialValue: availableModels.contains(resolvedComfyModel)
-                    ? resolvedComfyModel
-                    : (availableModels.isNotEmpty
-                        ? availableModels.first
-                        : null),
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              SegmentedButton<ComfyUpscaleModule>(
+                segments: const [
+                  ButtonSegment(
+                    value: ComfyUpscaleModule.regular,
+                    label: Text('普通模型'),
+                    icon: Icon(Icons.auto_fix_high_outlined, size: 16),
+                  ),
+                  ButtonSegment(
+                    value: ComfyUpscaleModule.seedvr2,
+                    label: Text('SeedVR2'),
+                    icon: Icon(Icons.video_settings_outlined, size: 16),
+                  ),
+                  ButtonSegment(
+                    value: ComfyUpscaleModule.rtx,
+                    label: Text('RTX'),
+                    icon: Icon(Icons.memory_outlined, size: 16),
+                  ),
+                ],
+                selected: {comfyModule},
+                onSelectionChanged: (v) =>
+                    controller.updateComfyUpscaleModule(v.first),
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                dropdownColor: theme.colorScheme.surfaceContainerHigh,
-                items: availableModels
-                    .map(
-                      (m) => DropdownMenuItem(
-                        value: m,
-                        child: Text(
-                          _friendlyModelName(m),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (v) {
-                  if (v != null) controller.updateUpscaleComfyModel(v);
-                },
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 12),
+              if (!isComfyRtx) ...[
+                Text(
+                  '超分模型',
+                  style:
+                      theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
+                ),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<String>(
+                  key: ValueKey(
+                    'upscale_model_${comfyModule.name}_${moduleModels.length}',
+                  ),
+                  initialValue: moduleModels.contains(resolvedComfyModel)
+                      ? resolvedComfyModel
+                      : null,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                  dropdownColor: theme.colorScheme.surfaceContainerHigh,
+                  items: moduleModels
+                      .map(
+                        (m) => DropdownMenuItem(
+                          value: m,
+                          child: Text(
+                            _friendlyModelName(m),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: moduleModels.isEmpty
+                      ? null
+                      : (v) {
+                          if (v != null) {
+                            controller.updateUpscaleComfyModel(v);
+                          }
+                        },
+                ),
+                if (moduleModels.isEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    isComfySeedvr2
+                        ? '未发现 SeedVR2 模型，请刷新模型列表或检查 SeedVR2 节点/模型文件。'
+                        : '未发现普通超分模型，请刷新模型列表或检查 models/upscale_models。',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.orangeAccent,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 6),
+              ],
               Text(
-                isComfySeedvr2
-                    ? '将使用 SeedVR2VideoUpscaler 流程。'
-                    : '将使用 UpscaleModelLoader + ImageUpscaleWithModel 流程，并用 Lanczos 修正到目标倍率。',
+                switch (comfyModule) {
+                  ComfyUpscaleModule.seedvr2 when upscale.seedvr2Tiled =>
+                    '将使用 SeedVR2TilingUpscaler 分块超分流程。',
+                  ComfyUpscaleModule.seedvr2 => '将使用 SeedVR2VideoUpscaler 流程。',
+                  ComfyUpscaleModule.regular =>
+                    '将使用 UpscaleModelLoader + ImageUpscaleWithModel 流程，并用 Lanczos 修正到目标倍率。',
+                  ComfyUpscaleModule.rtx =>
+                    '将使用 RTX Video Super Resolution 流程，无需选择模型。',
+                },
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: Colors.white70,
                 ),
               ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: () =>
-                      ref.read(comfyUISeedvr2ModelsProvider.notifier).fetch(),
-                  icon: const Icon(Icons.refresh, size: 14),
-                  label: Text(
-                    '刷新模型列表',
-                    style: theme.textTheme.labelSmall,
-                  ),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 28),
+              if (!isComfyRtx)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: () =>
+                        ref.read(comfyUISeedvr2ModelsProvider.notifier).fetch(),
+                    icon: const Icon(Icons.refresh, size: 14),
+                    label: Text(
+                      '刷新模型列表',
+                      style: theme.textTheme.labelSmall,
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 28),
+                    ),
                   ),
                 ),
-              ),
               const SizedBox(height: 4),
               _buildScaleSlider(theme, upscale, controller),
+              if (isComfySeedvr2) ...[
+                const SizedBox(height: 8),
+                _buildSeedvr2Controls(theme, upscale, controller),
+              ],
               const SizedBox(height: 8),
               if (taskState.isRunning) ...[
                 if (taskState.hasPreview) ...[
@@ -843,6 +926,117 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     );
   }
 
+  Widget _buildSeedvr2Controls(
+    ThemeData theme,
+    UpscaleWorkflowSettings upscale,
+    ImageWorkflowController controller,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildIntegerSliderSection(
+          theme,
+          label: 'VAE Tile Size',
+          value: upscale.seedvr2VaeTileSize,
+          min: UpscaleWorkflowSettings.minSeedvr2VaeTileSize,
+          max: UpscaleWorkflowSettings.maxSeedvr2VaeTileSize,
+          step: 64,
+          onChanged: controller.updateSeedvr2VaeTileSize,
+          hint: '同时写入 SeedVR2 VAE MODEL 的 encode/decode tile size。',
+        ),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: Text(
+            '使用分块放大',
+            style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
+          ),
+          subtitle: Text(
+            '启用后改用 SeedVR2TilingUpscaler，适合大图或显存压力较高的场景。',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Colors.white70,
+              height: 1.35,
+            ),
+          ),
+          value: upscale.seedvr2Tiled,
+          onChanged: controller.updateSeedvr2Tiled,
+        ),
+        if (upscale.seedvr2Tiled)
+          _buildIntegerSliderSection(
+            theme,
+            label: '分块图块大小',
+            value: upscale.seedvr2TileSize,
+            min: UpscaleWorkflowSettings.minSeedvr2TileSize,
+            max: UpscaleWorkflowSettings.maxSeedvr2TileSize,
+            step: 64,
+            onChanged: controller.updateSeedvr2TileSize,
+            hint: '同时控制 SeedVR2TilingUpscaler 的 tile_width / tile_height。',
+          ),
+      ],
+    );
+  }
+
+  Widget _buildIntegerSliderSection(
+    ThemeData theme, {
+    required String label,
+    required int value,
+    required int min,
+    required int max,
+    required int step,
+    required ValueChanged<double> onChanged,
+    String? hint,
+  }) {
+    final clamped = value.clamp(min, max).toInt();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            EditableDoubleField(
+              value: clamped.toDouble(),
+              min: min.toDouble(),
+              max: max.toDouble(),
+              decimals: 0,
+              width: 72,
+              onChanged: onChanged,
+              textStyle: theme.textTheme.bodySmall?.copyWith(
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 4,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+          ),
+          child: Slider(
+            value: clamped.toDouble(),
+            min: min.toDouble(),
+            max: max.toDouble(),
+            divisions: ((max - min) / step).round(),
+            onChanged: onChanged,
+          ),
+        ),
+        if (hint != null)
+          Text(
+            hint,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Colors.white70,
+            ),
+          ),
+      ],
+    );
+  }
+
   static String _friendlyModelName(String filename) {
     final base = filename
         .replaceAll('.safetensors', '')
@@ -854,16 +1048,47 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
         : '普通模型 · $base';
   }
 
+  static String _sourceLogSummary(ImageParams params, Uint8List src) {
+    return 'sourceBytes=${src.length}, paramsSize=${params.width}x${params.height}, '
+        'action=${params.action.name}, model=${params.model}';
+  }
+
+  static String _workflowLogSummary(ImageWorkflowState wf) {
+    final upscale = wf.upscale;
+    return 'backend=${upscale.backend.name}, module=${upscale.comfyModule.name}, '
+        'scale=${upscale.comfyScale}, comfyModel=${upscale.comfyModel}, '
+        'seedvr2Tiled=${upscale.seedvr2Tiled}, '
+        'seedvr2VaeTileSize=${upscale.seedvr2VaeTileSize}, '
+        'seedvr2TileSize=${upscale.seedvr2TileSize}, '
+        'fileLogging=${AppLogger.fileLoggingEnabled}';
+  }
+
+  static String _resultLogSummary(List<Uint8List>? results) {
+    if (results == null) return 'null';
+    return 'count=${results.length}, bytes=[${results.map((r) => r.length).join(', ')}]';
+  }
+
   Future<void> _runUpscale() async {
     final params = ref.read(generationParamsNotifierProvider);
     final src = params.sourceImage;
-    if (src == null) return;
+    if (src == null) {
+      AppLogger.w(
+          'Start requested but source image is missing', _upscaleLogTag);
+      return;
+    }
 
     final wf = ref.read(imageWorkflowControllerProvider);
+    AppLogger.i(
+      'Start requested: ${_sourceLogSummary(params, src)}; '
+      '${_workflowLogSummary(wf)}',
+      _upscaleLogTag,
+    );
 
     if (wf.upscale.backend == UpscaleBackend.novelai) {
+      AppLogger.d('Dispatching to NovelAI upscale', _upscaleLogTag);
       await _runNaiUpscale(params, src);
     } else {
+      AppLogger.d('Dispatching to ComfyUI upscale', _upscaleLogTag);
       await _runComfyUpscale(params, src, wf);
     }
   }
@@ -873,21 +1098,44 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     Uint8List src,
     ImageWorkflowState wf,
   ) async {
-    if (isComfySeedvr2UpscaleModel(wf.upscale.comfyModel)) {
-      await _runComfySeedvr2Upscale(params, src, wf);
-    } else {
-      await _runComfyModelUpscale(params, src, wf);
+    AppLogger.d(
+      'ComfyUI module selected: ${wf.upscale.comfyModule.name}',
+      _upscaleLogTag,
+    );
+    switch (wf.upscale.comfyModule) {
+      case ComfyUpscaleModule.regular:
+        await _runComfyModelUpscale(params, src, wf);
+        break;
+      case ComfyUpscaleModule.seedvr2:
+        await _runComfySeedvr2Upscale(params, src, wf);
+        break;
+      case ComfyUpscaleModule.rtx:
+        await _runComfyRtxUpscale(params, src, wf);
+        break;
     }
   }
 
   Future<void> _runNaiUpscale(ImageParams params, Uint8List src) async {
+    AppLogger.i(
+      'NovelAI upscale begin: ${_sourceLogSummary(params, src)}',
+      _upscaleLogTag,
+    );
     setState(() => _naiUpscaling = true);
     try {
       final apiService = ref.read(naiImageEnhancementApiServiceProvider);
+      AppLogger.d('NovelAI upscale API request start', _upscaleLogTag);
       final result = await apiService.upscaleImage(src, scale: 4);
+      AppLogger.i(
+        'NovelAI upscale API returned: bytes=${result.length}',
+        _upscaleLogTag,
+      );
       if (!mounted) return;
 
       final saveSettings = ref.read(imageSaveSettingsNotifierProvider);
+      AppLogger.d(
+        'Registering NovelAI upscale result: autoSave=${saveSettings.autoSave}',
+        _upscaleLogTag,
+      );
       await ref
           .read(imageGenerationNotifierProvider.notifier)
           .registerExternalImage(
@@ -896,10 +1144,13 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
             saveToLocal: saveSettings.autoSave,
             addToDisplay: true,
           );
+      AppLogger.i('NovelAI upscale result registered', _upscaleLogTag);
       if (mounted) AppToast.success(context, 'NovelAI 超分完成');
     } catch (e) {
+      AppLogger.w('NovelAI upscale failed: $e', _upscaleLogTag);
       if (mounted) AppToast.error(context, e.toString());
     } finally {
+      AppLogger.d('NovelAI upscale end', _upscaleLogTag);
       if (mounted) setState(() => _naiUpscaling = false);
     }
   }
@@ -910,34 +1161,108 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     ImageWorkflowState wf,
   ) async {
     final scale = wf.upscale.comfyScale;
-    final model = wf.upscale.comfyModel;
+    final seedvr2Models = ref.read(comfyUISeedvr2ModelsProvider);
+    AppLogger.i(
+      'SeedVR2 upscale begin: ${_sourceLogSummary(params, src)}; '
+      '${_workflowLogSummary(wf)}',
+      _upscaleLogTag,
+    );
+    final model = resolveComfyUpscaleModelForModule(
+      seedvr2Models,
+      module: ComfyUpscaleModule.seedvr2,
+      currentModel: wf.upscale.comfyModel,
+    );
+    AppLogger.d(
+      'SeedVR2 model resolved: available=${seedvr2Models.length}, '
+      'selected=${model ?? '<none>'}',
+      _upscaleLogTag,
+    );
+    if (model == null) {
+      AppLogger.w('SeedVR2 model is missing', _upscaleLogTag);
+      if (mounted) AppToast.error(context, '未选择可用的 SeedVR2 模型');
+      return;
+    }
+    AppLogger.d('SeedVR2 source decode start', _upscaleLogTag);
+    final decodedSource = img.decodeImage(src);
+    if (decodedSource == null) {
+      AppLogger.w('SeedVR2 source decode failed', _upscaleLogTag);
+      if (mounted) AppToast.error(context, '无法解码源图像');
+      return;
+    }
+    AppLogger.d(
+      'SeedVR2 source decoded: ${decodedSource.width}x${decodedSource.height}',
+      _upscaleLogTag,
+    );
+    final targetResolution = wf.upscale.seedvr2Tiled
+        ? calculateComfySeedvr2TiledTargetResolution(
+            sourceWidth: decodedSource.width,
+            sourceHeight: decodedSource.height,
+            scale: scale,
+          )
+        : calculateComfySeedvr2TargetResolution(
+            sourceWidth: decodedSource.width,
+            sourceHeight: decodedSource.height,
+            scale: scale,
+          );
+    final templateId = wf.upscale.seedvr2Tiled
+        ? comfySeedvr2TiledUpscaleTemplateId
+        : comfySeedvr2UpscaleTemplateId;
+    final tileUpscaleResolution = math.max(
+      64,
+      math.min(
+        8192,
+        (wf.upscale.seedvr2TileSize * scale).round(),
+      ),
+    );
 
+    AppLogger.i(
+      'SeedVR2 execute start: template=$templateId, model=$model, '
+      'targetResolution=$targetResolution, tileUpscaleResolution=$tileUpscaleResolution',
+      _upscaleLogTag,
+    );
     final results = await ref.read(comfyUITaskProvider.notifier).execute(
-      templateId: comfySeedvr2UpscaleTemplateId,
+      templateId: templateId,
       inputImages: {'input_image': src},
       paramValues: {
-        'scale_multiplier': scale,
+        'target_resolution': targetResolution,
         'dit_model': model,
+        'vae_encode_tile_size': wf.upscale.seedvr2VaeTileSize,
+        'vae_decode_tile_size': wf.upscale.seedvr2VaeTileSize,
+        if (wf.upscale.seedvr2Tiled) ...{
+          'tile_size': wf.upscale.seedvr2TileSize,
+          'tile_upscale_resolution': tileUpscaleResolution,
+        },
         'seed': -1,
       },
     );
+    AppLogger.i(
+      'SeedVR2 execute returned: ${_resultLogSummary(results)}',
+      _upscaleLogTag,
+    );
 
-    if (!mounted || results == null || results.isEmpty) return;
+    if (!mounted || results == null || results.isEmpty) {
+      AppLogger.w(
+        'SeedVR2 result ignored: mounted=$mounted, '
+        'results=${_resultLogSummary(results)}',
+        _upscaleLogTag,
+      );
+      return;
+    }
 
     final bytes = results.last;
 
+    AppLogger.d(
+        'SeedVR2 result decode start: bytes=${bytes.length}', _upscaleLogTag);
     final decoded = img.decodeImage(bytes);
-    final srcDecoded = decoded == null ? img.decodeImage(src) : null;
-    final outW = decoded?.width ??
-        (srcDecoded != null
-            ? (srcDecoded.width * scale).round()
-            : params.width);
-    final outH = decoded?.height ??
-        (srcDecoded != null
-            ? (srcDecoded.height * scale).round()
-            : params.height);
+    final outW = decoded?.width ?? (decodedSource.width * scale).round();
+    final outH = decoded?.height ?? (decodedSource.height * scale).round();
+    AppLogger.d('SeedVR2 result size: ${outW}x$outH', _upscaleLogTag);
 
     final saveSettings = ref.read(imageSaveSettingsNotifierProvider);
+    AppLogger.d(
+      'Registering SeedVR2 result: autoSave=${saveSettings.autoSave}',
+      _upscaleLogTag,
+    );
     await ref
         .read(imageGenerationNotifierProvider.notifier)
         .registerExternalImage(
@@ -948,6 +1273,7 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
           saveToLocal: saveSettings.autoSave,
           addToDisplay: true,
         );
+    AppLogger.i('SeedVR2 result registered: ${outW}x$outH', _upscaleLogTag);
 
     if (mounted) {
       AppToast.success(context, '超分完成 ($outW×$outH)，已加入预览列表');
@@ -960,16 +1286,47 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     ImageWorkflowState wf,
   ) async {
     final scale = wf.upscale.comfyScale;
-    final model = wf.upscale.comfyModel;
+    final upscaleModels = ref.read(comfyUISeedvr2ModelsProvider);
+    AppLogger.i(
+      'Regular ComfyUI upscale begin: ${_sourceLogSummary(params, src)}; '
+      '${_workflowLogSummary(wf)}',
+      _upscaleLogTag,
+    );
+    final model = resolveComfyUpscaleModelForModule(
+      upscaleModels,
+      module: ComfyUpscaleModule.regular,
+      currentModel: wf.upscale.comfyModel,
+    );
+    AppLogger.d(
+      'Regular ComfyUI model resolved: available=${upscaleModels.length}, '
+      'selected=${model ?? '<none>'}',
+      _upscaleLogTag,
+    );
+    if (model == null) {
+      AppLogger.w('Regular ComfyUI model is missing', _upscaleLogTag);
+      if (mounted) AppToast.error(context, '未选择可用的普通超分模型');
+      return;
+    }
+    AppLogger.d('Regular ComfyUI source decode start', _upscaleLogTag);
     final decodedSource = img.decodeImage(src);
     if (decodedSource == null) {
+      AppLogger.w('Regular ComfyUI source decode failed', _upscaleLogTag);
       if (mounted) AppToast.error(context, '无法解码源图像');
       return;
     }
+    AppLogger.d(
+      'Regular ComfyUI source decoded: ${decodedSource.width}x${decodedSource.height}',
+      _upscaleLogTag,
+    );
 
     final targetWidth = math.max(1, (decodedSource.width * scale).round());
     final targetHeight = math.max(1, (decodedSource.height * scale).round());
 
+    AppLogger.i(
+      'Regular ComfyUI execute start: template=$comfyModelUpscaleTemplateId, '
+      'model=$model, target=${targetWidth}x$targetHeight',
+      _upscaleLogTag,
+    );
     final results = await ref.read(comfyUITaskProvider.notifier).execute(
       templateId: comfyModelUpscaleTemplateId,
       inputImages: {'input_image': src},
@@ -979,15 +1336,35 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
         'target_height': targetHeight,
       },
     );
+    AppLogger.i(
+      'Regular ComfyUI execute returned: ${_resultLogSummary(results)}',
+      _upscaleLogTag,
+    );
 
-    if (!mounted || results == null || results.isEmpty) return;
+    if (!mounted || results == null || results.isEmpty) {
+      AppLogger.w(
+        'Regular ComfyUI result ignored: mounted=$mounted, '
+        'results=${_resultLogSummary(results)}',
+        _upscaleLogTag,
+      );
+      return;
+    }
 
     final bytes = results.last;
+    AppLogger.d(
+      'Regular ComfyUI result decode start: bytes=${bytes.length}',
+      _upscaleLogTag,
+    );
     final decoded = img.decodeImage(bytes);
     final outW = decoded?.width ?? targetWidth;
     final outH = decoded?.height ?? targetHeight;
+    AppLogger.d('Regular ComfyUI result size: ${outW}x$outH', _upscaleLogTag);
 
     final saveSettings = ref.read(imageSaveSettingsNotifierProvider);
+    AppLogger.d(
+      'Registering regular ComfyUI result: autoSave=${saveSettings.autoSave}',
+      _upscaleLogTag,
+    );
     await ref
         .read(imageGenerationNotifierProvider.notifier)
         .registerExternalImage(
@@ -998,9 +1375,92 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
           saveToLocal: saveSettings.autoSave,
           addToDisplay: true,
         );
+    AppLogger.i(
+      'Regular ComfyUI result registered: ${outW}x$outH',
+      _upscaleLogTag,
+    );
 
     if (mounted) {
       AppToast.success(context, '普通模型超分完成 ($outW×$outH)，已加入预览列表');
+    }
+  }
+
+  Future<void> _runComfyRtxUpscale(
+    ImageParams params,
+    Uint8List src,
+    ImageWorkflowState wf,
+  ) async {
+    final scale = wf.upscale.comfyScale;
+    AppLogger.i(
+      'RTX upscale begin: ${_sourceLogSummary(params, src)}; '
+      '${_workflowLogSummary(wf)}',
+      _upscaleLogTag,
+    );
+    AppLogger.d('RTX source decode start', _upscaleLogTag);
+    final decodedSource = img.decodeImage(src);
+    if (decodedSource == null) {
+      AppLogger.w('RTX source decode failed', _upscaleLogTag);
+      if (mounted) AppToast.error(context, '无法解码源图像');
+      return;
+    }
+    AppLogger.d(
+      'RTX source decoded: ${decodedSource.width}x${decodedSource.height}',
+      _upscaleLogTag,
+    );
+
+    AppLogger.i(
+      'RTX execute start: template=$comfyRtxUpscaleTemplateId, scale=$scale',
+      _upscaleLogTag,
+    );
+    final results = await ref.read(comfyUITaskProvider.notifier).execute(
+      templateId: comfyRtxUpscaleTemplateId,
+      inputImages: {'input_image': src},
+      paramValues: {
+        'rtx_scale': scale,
+      },
+    );
+    AppLogger.i(
+      'RTX execute returned: ${_resultLogSummary(results)}',
+      _upscaleLogTag,
+    );
+
+    if (!mounted || results == null || results.isEmpty) {
+      AppLogger.w(
+        'RTX result ignored: mounted=$mounted, results=${_resultLogSummary(results)}',
+        _upscaleLogTag,
+      );
+      return;
+    }
+
+    final bytes = results.last;
+    AppLogger.d(
+        'RTX result decode start: bytes=${bytes.length}', _upscaleLogTag);
+    final decoded = img.decodeImage(bytes);
+    final outW = decoded?.width ??
+        math.max(8, ((decodedSource.width * scale) / 8).round() * 8);
+    final outH = decoded?.height ??
+        math.max(8, ((decodedSource.height * scale) / 8).round() * 8);
+    AppLogger.d('RTX result size: ${outW}x$outH', _upscaleLogTag);
+
+    final saveSettings = ref.read(imageSaveSettingsNotifierProvider);
+    AppLogger.d(
+      'Registering RTX result: autoSave=${saveSettings.autoSave}',
+      _upscaleLogTag,
+    );
+    await ref
+        .read(imageGenerationNotifierProvider.notifier)
+        .registerExternalImage(
+          bytes,
+          params: params,
+          width: outW,
+          height: outH,
+          saveToLocal: saveSettings.autoSave,
+          addToDisplay: true,
+        );
+    AppLogger.i('RTX result registered: ${outW}x$outH', _upscaleLogTag);
+
+    if (mounted) {
+      AppToast.success(context, 'RTX 超分完成 ($outW×$outH)，已加入预览列表');
     }
   }
 
@@ -1065,7 +1525,9 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
         .where(
           (t) =>
               t.id != comfySeedvr2UpscaleTemplateId &&
+              t.id != comfySeedvr2TiledUpscaleTemplateId &&
               t.id != comfyModelUpscaleTemplateId &&
+              t.id != comfyRtxUpscaleTemplateId &&
               t.requiresInputImage,
         )
         .toList();

@@ -34,6 +34,7 @@ class StorageKeys {
   static const String fontFamily = 'font_family';
   static const String fontScale = 'font_scale';
   static const String locale = 'locale';
+  static const String fileLoggingEnabled = 'file_logging_enabled';
 
   // Window State Keys (窗口状态)
   static const String windowWidth = 'window_width';
@@ -245,6 +246,11 @@ class StorageKeys {
   static const String comfyuiUpscaleModel = 'comfyui_upscale_model';
   static const String comfyuiUpscaleScale = 'comfyui_upscale_scale';
   static const String comfyuiUpscaleBackend = 'comfyui_upscale_backend';
+  static const String comfyuiUpscaleModule = 'comfyui_upscale_module';
+  static const String comfyuiSeedvr2VaeTileSize =
+      'comfyui_seedvr2_vae_tile_size';
+  static const String comfyuiSeedvr2Tiled = 'comfyui_seedvr2_tiled';
+  static const String comfyuiSeedvr2TileSize = 'comfyui_seedvr2_tile_size';
 
   // 工作流设置
   static const String workflowEnhanceMagnitude = 'workflow_enhance_magnitude';
