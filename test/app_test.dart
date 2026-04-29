@@ -1,21 +1,39 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:nai_launcher/app.dart';
 import 'package:nai_launcher/core/comfyui/builtin_workflows.dart';
 import 'package:nai_launcher/core/comfyui/comfyui_url_utils.dart';
+import 'package:nai_launcher/core/comfyui/workflow_node_validator.dart';
+import 'package:nai_launcher/core/comfyui/workflow_template_manager.dart';
+import 'package:nai_launcher/core/shortcuts/default_shortcuts.dart';
+import 'package:nai_launcher/core/shortcuts/shortcut_config.dart';
+import 'package:nai_launcher/core/utils/file_explorer_utils.dart';
+import 'package:nai_launcher/core/utils/nai_resolution_adapter.dart';
 import 'package:nai_launcher/data/models/fixed_tag/fixed_tag_entry.dart';
+import 'package:nai_launcher/data/models/gallery/gallery_statistics.dart';
+import 'package:nai_launcher/data/models/gallery/local_image_record.dart';
+import 'package:nai_launcher/data/models/gallery/nai_image_metadata.dart';
 import 'package:nai_launcher/data/services/local_onnx_tagger_service.dart';
+import 'package:nai_launcher/data/services/statistics_service.dart';
+import 'package:nai_launcher/l10n/app_localizations.dart';
 import 'package:nai_launcher/presentation/providers/fixed_tags_provider.dart';
 import 'package:nai_launcher/presentation/providers/generation/image_workflow_controller.dart';
+import 'package:nai_launcher/presentation/providers/local_gallery_provider.dart';
+import 'package:nai_launcher/presentation/providers/selection_mode_provider.dart';
 import 'package:nai_launcher/presentation/providers/share_image_settings_provider.dart';
+import 'package:nai_launcher/presentation/providers/shortcuts_provider.dart';
 import 'package:nai_launcher/presentation/prompt_assistant/models/prompt_assistant_models.dart';
 import 'package:nai_launcher/presentation/prompt_assistant/providers/prompt_assistant_history_provider.dart';
 import 'package:nai_launcher/presentation/prompt_assistant/services/prompt_assistant_api_client.dart';
 import 'package:nai_launcher/presentation/prompt_assistant/services/prompt_assistant_service.dart';
+import 'package:nai_launcher/presentation/screens/statistics/widgets/dashboard/aspect_ratio_card.dart';
 import 'package:nai_launcher/presentation/utils/dropped_file_reader.dart';
+import 'package:nai_launcher/presentation/widgets/gallery/local_gallery_toolbar.dart';
+import 'package:nai_launcher/presentation/widgets/shortcuts/shortcut_aware_widget.dart';
 
 class _MockDio extends Mock implements Dio {}
 
@@ -99,6 +117,63 @@ void main() {
 
       expect(buildCount, 1);
     });
+
+    testWidgets('本地画廊搜索框 Ctrl+A 应选择文本而不是进入多选', (tester) async {
+      var enteredSelectionMode = false;
+      const query = 'a';
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            localGalleryNotifierProvider.overrideWith(
+              _FakeLocalGalleryNotifier.new,
+            ),
+            shortcutConfigNotifierProvider.overrideWith(
+              _FakeShortcutConfigNotifier.new,
+            ),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: PageShortcuts(
+                contextType: ShortcutContext.gallery,
+                shortcuts: {
+                  ShortcutIds.enterSelectionMode: () {
+                    enteredSelectionMode = true;
+                  },
+                },
+                child: const LocalGalleryToolbar(
+                  enableSearchAutocomplete: false,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      final textField = find.byType(TextField);
+      await tester.tap(textField);
+      await tester.enterText(textField, query);
+      await tester.pump();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+
+      final editable = tester.widget<EditableText>(find.byType(EditableText));
+      expect(editable.controller.selection.baseOffset, 0);
+      expect(editable.controller.selection.extentOffset, query.length);
+      expect(enteredSelectionMode, isFalse);
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(LocalGalleryToolbar)),
+      );
+      expect(
+        container.read(localGallerySelectionNotifierProvider).isActive,
+        isFalse,
+      );
+    });
   });
 
   group('ComfyUI URL helpers', () {
@@ -133,7 +208,162 @@ void main() {
     });
   });
 
+  group('File explorer helpers', () {
+    test('uses a separate Explorer select switch for paths with spaces', () {
+      const filePath = r'C:\Users\alice\NAI Launcher\history image.png';
+
+      expect(
+        FileExplorerUtils.windowsRevealFileArguments(filePath),
+        ['/select,', filePath],
+      );
+    });
+  });
+
   group('ComfyUI upscale workflows', () {
+    test('SeedVR2 workflow avoids optional helper nodes', () {
+      final workflow = BuiltinWorkflows.all.firstWhere(
+        (workflow) => workflow.id == comfySeedvr2UpscaleTemplateId,
+      );
+      final nodeTypes = extractWorkflowNodeTypes(workflow.workflowJson);
+
+      expect(nodeTypes, isNot(contains('Float')));
+      expect(nodeTypes, isNot(contains('easy imageSizeBySide')));
+      expect(nodeTypes, isNot(contains('LayerUtility: NumberCalculatorV2')));
+      expect(workflow.workflowJson['5']['inputs']['resolution'], isA<int>());
+      expect(
+        workflow.parameterSlots.map((slot) => slot.id),
+        contains('target_resolution'),
+      );
+    });
+
+    test('injects SeedVR2 target resolution into the upscaler node', () {
+      final manager = WorkflowTemplateManager()..loadBuiltinTemplates();
+      final workflow = manager.getById(comfySeedvr2UpscaleTemplateId)!;
+
+      final executable = manager.buildExecutableWorkflow(
+        template: workflow,
+        paramValues: const {'target_resolution': 1536},
+      );
+
+      expect(executable['5']['inputs']['resolution'], 1536);
+    });
+
+    test('injects SeedVR2 VAE tile size into encode and decode fields', () {
+      final manager = WorkflowTemplateManager()..loadBuiltinTemplates();
+      final workflow = manager.getById(comfySeedvr2UpscaleTemplateId)!;
+
+      final executable = manager.buildExecutableWorkflow(
+        template: workflow,
+        paramValues: const {
+          'vae_encode_tile_size': 768,
+          'vae_decode_tile_size': 768,
+        },
+      );
+
+      expect(executable['7']['inputs']['encode_tile_size'], 768);
+      expect(executable['7']['inputs']['decode_tile_size'], 768);
+    });
+
+    test('includes RTX upscale workflow using Nvidia RTX nodes', () {
+      final manager = WorkflowTemplateManager()..loadBuiltinTemplates();
+      final workflow = manager.getById('builtin_rtx_upscale')!;
+      final nodeTypes = extractWorkflowNodeTypes(workflow.workflowJson);
+
+      expect(nodeTypes, contains('RTXVideoSuperResolution'));
+      expect(nodeTypes, isNot(contains('UpscaleModelLoader')));
+      expect(
+        workflow.parameterSlots.map((slot) => slot.id),
+        contains('rtx_scale'),
+      );
+    });
+
+    test('includes SeedVR2 tiled workflow with tile size controls', () {
+      final manager = WorkflowTemplateManager()..loadBuiltinTemplates();
+      final workflow = manager.getById('builtin_seedvr2_tiled_upscale')!;
+
+      final executable = manager.buildExecutableWorkflow(
+        template: workflow,
+        paramValues: const {
+          'tile_size': 1280,
+          'tile_upscale_resolution': 1536,
+        },
+      );
+
+      expect(executable['8']['class_type'], 'SeedVR2TilingUpscaler');
+      expect(executable['8']['inputs']['tile_width'], 1280);
+      expect(executable['8']['inputs']['tile_height'], 1280);
+      expect(executable['8']['inputs']['tile_upscale_resolution'], 1536);
+    });
+
+    test('detects missing ComfyUI node types before queueing workflow', () {
+      final missing = findMissingWorkflowNodeTypes(
+        workflow: {
+          '1': {
+            'class_type': 'LoadImage',
+            'inputs': <String, dynamic>{},
+          },
+          '18': {
+            'class_type': 'Float',
+            'inputs': <String, dynamic>{},
+          },
+        },
+        objectInfo: {
+          'LoadImage': <String, dynamic>{},
+        },
+      );
+
+      expect(missing, ['Float']);
+      expect(
+        formatMissingWorkflowNodeTypesMessage(missing),
+        contains('Float'),
+      );
+    });
+
+    test('calculates SeedVR2 target resolution from source shortest side', () {
+      expect(
+        calculateComfySeedvr2TargetResolution(
+          sourceWidth: 832,
+          sourceHeight: 1216,
+          scale: 1.5,
+        ),
+        1248,
+      );
+    });
+
+    test('adapts img2img sources to 64-pixel grid without preset snapping', () {
+      final adapted = NaiResolutionAdapter.findClosestResolution(1000, 1400);
+
+      expect(adapted.width, 1024);
+      expect(adapted.height, 1408);
+      expect(
+        NaiResolutionAdapter.isCompatible(adapted.width, adapted.height),
+        isTrue,
+      );
+    });
+
+    test('does not overwrite saved upscale model before server fetch', () {
+      expect(
+        shouldAutoPersistResolvedUpscaleModel(
+          isComfyBackend: true,
+          hasFetchedFromServer: false,
+          availableModels: const ['seedvr2_ema_7b_fp16.safetensors'],
+          currentModel: 'seedvr2_ema_3b-Q4_K_M.gguf',
+          resolvedModel: 'seedvr2_ema_7b_fp16.safetensors',
+        ),
+        isFalse,
+      );
+      expect(
+        shouldAutoPersistResolvedUpscaleModel(
+          isComfyBackend: true,
+          hasFetchedFromServer: true,
+          availableModels: const ['seedvr2_ema_7b_fp16.safetensors'],
+          currentModel: 'missing-model.safetensors',
+          resolvedModel: 'seedvr2_ema_7b_fp16.safetensors',
+        ),
+        isTrue,
+      );
+    });
+
     test('includes regular model upscale workflow with Lanczos final resize',
         () {
       final workflow = BuiltinWorkflows.all.firstWhere(
@@ -165,6 +395,59 @@ void main() {
         isComfySeedvr2UpscaleModel('realesrganX4plusAnime_v1.pt'),
         isFalse,
       );
+    });
+  });
+
+  group('Statistics dashboard', () {
+    test('ignores non-positive image dimensions in resolution statistics', () {
+      final service = StatisticsService();
+      final modifiedAt = DateTime(2026);
+
+      final stats = service.calculateStatistics([
+        LocalImageRecord(
+          path: 'zero.png',
+          size: 1024,
+          modifiedAt: modifiedAt,
+          metadata: const NaiImageMetadata(width: 0, height: 0),
+        ),
+        LocalImageRecord(
+          path: 'valid.png',
+          size: 1024,
+          modifiedAt: modifiedAt,
+          metadata: const NaiImageMetadata(width: 1024, height: 1024),
+        ),
+      ]);
+
+      expect(stats.resolutionDistribution.map((r) => r.label), ['1024x1024']);
+    });
+
+    testWidgets('aspect ratio card skips invalid cached resolutions', (
+      tester,
+    ) async {
+      final stats = GalleryStatistics(
+        totalImages: 2,
+        totalSizeBytes: 2048,
+        averageFileSizeBytes: 1024,
+        resolutionDistribution: const [
+          ResolutionStatistics(label: '0x0', count: 1),
+          ResolutionStatistics(label: '1024x1024', count: 1),
+        ],
+        calculatedAt: DateTime(2026),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(body: AspectRatioCard(stats: stats)),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('宽高比分布'), findsOneWidget);
+      expect(find.text('1:1'), findsOneWidget);
     });
   });
 
@@ -738,4 +1021,23 @@ void main() {
       );
     });
   });
+}
+
+class _FakeLocalGalleryNotifier extends LocalGalleryNotifier {
+  @override
+  LocalGalleryState build() => const LocalGalleryState(
+        isInitialized: true,
+        totalPages: 1,
+      );
+
+  @override
+  Future<void> setSearchQuery(String query) async {}
+
+  @override
+  Future<void> clearAllFilters() async {}
+}
+
+class _FakeShortcutConfigNotifier extends ShortcutConfigNotifier {
+  @override
+  Future<ShortcutConfig> build() async => ShortcutConfig.createDefault();
 }
