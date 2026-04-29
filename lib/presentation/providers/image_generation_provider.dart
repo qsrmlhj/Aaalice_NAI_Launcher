@@ -8,6 +8,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/utils/app_logger.dart';
 import '../../core/utils/image_save_utils.dart';
+import '../../core/utils/image_share_sanitizer.dart';
 import '../../core/utils/nai_prompt_formatter.dart';
 import '../../data/services/image_metadata_service.dart';
 import '../../data/datasources/remote/nai_image_generation_api_service.dart';
@@ -51,6 +52,18 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
   @override
   ImageGenerationState build() {
     return const ImageGenerationState();
+  }
+
+  void _retainSharePreparationCacheForCurrentHistory() {
+    final retainedImageIds = <String>{
+      for (final image in state.currentImages) image.id,
+      for (final image in state.history) image.id,
+    };
+    unawaited(
+      ShareImagePreparationService.instance.retainHistoryImageIds(
+        retainedImageIds,
+      ),
+    );
   }
 
   /// 生成图像
@@ -279,6 +292,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
             history: [...generatedList, ...state.history].take(50).toList(),
             clearStreamPreview: true,
           );
+          _retainSharePreparationCacheForCurrentHistory();
         } else {
           generatedImages += batchSize; // 即使失败也要跳过，避免死循环
         }
@@ -388,6 +402,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
       displayWidth: addToDisplay ? resolvedSize.$1 : state.displayWidth,
       displayHeight: addToDisplay ? resolvedSize.$2 : state.displayHeight,
     );
+    _retainSharePreparationCacheForCurrentHistory();
 
     if (saveToLocal) {
       await _saveImagesToGallery(
@@ -855,6 +870,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
           history: [...generatedList, ...state.history].take(50).toList(),
           clearStreamPreview: true,
         );
+        _retainSharePreparationCacheForCurrentHistory();
         await _autoSaveIfEnabled(generatedList, params);
         _preloadMetadataInBackground(generatedList);
         return;
@@ -939,6 +955,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
           totalImages: 0,
           clearStreamPreview: true,
         );
+        _retainSharePreparationCacheForCurrentHistory();
         // 保存 Vibe 编码哈希到状态
         if (vibeEncodings.isNotEmpty) {
           _saveVibeEncodings(vibeEncodings);
@@ -968,6 +985,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
           totalImages: 0,
           clearStreamPreview: true,
         );
+        _retainSharePreparationCacheForCurrentHistory();
         // 自动保存
         await _autoSaveIfEnabled([generatedImage], params);
         // 后台预解析元数据（不阻塞）
@@ -1000,6 +1018,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
           totalImages: 0,
           clearStreamPreview: true,
         );
+        _retainSharePreparationCacheForCurrentHistory();
         // 保存 Vibe 编码哈希到状态
         if (vibeEncodings.isNotEmpty) {
           _saveVibeEncodings(vibeEncodings);
@@ -1046,6 +1065,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
             totalImages: 0,
             clearStreamPreview: true,
           );
+          _retainSharePreparationCacheForCurrentHistory();
           if (vibeEncodings.isNotEmpty) {
             _saveVibeEncodings(vibeEncodings);
           }
@@ -1095,6 +1115,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
       currentImages: [],
       status: GenerationStatus.idle,
     );
+    _retainSharePreparationCacheForCurrentHistory();
   }
 
   /// 清除错误
@@ -1113,6 +1134,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
       currentImages: [],
       history: [],
     );
+    _retainSharePreparationCacheForCurrentHistory();
   }
 
   /// 更新显示图像列表
@@ -1148,6 +1170,7 @@ class ImageGenerationNotifier extends _$ImageGenerationNotifier {
       history: updatedHistory,
       displayImages: updatedDisplayImages,
     );
+    _retainSharePreparationCacheForCurrentHistory();
 
     AppLogger.d(
       'Updated filePath for image $imageId: ${updatedImage.filePath}',

@@ -41,6 +41,24 @@ class SelectableImageCard extends ConsumerStatefulWidget {
   /// 是否启用闪卡效果（边缘发光+光泽扫过）
   final bool enableGlossEffect;
 
+  /// 是否启用悬浮状态下的视觉效果和操作栏
+  final bool hoverEffectsEnabled;
+
+  /// 是否允许卡片在悬浮时预热复制/拖拽缓存
+  final bool shareWarmupEnabled;
+
+  /// 拖拽缓存是否已经准备完成。
+  ///
+  /// 历史面板会在缓存未准备好时禁用拖拽，并在预览图左下角保持
+  /// 小环形进度和百分比，直到缓存可拖拽后再恢复正常图片卡片。
+  final bool dragPreparationReady;
+
+  /// 完成图第一帧解码前保留的上一张流式预览，避免生成态切完成态时闪空。
+  final Uint8List? completionPlaceholderBytes;
+
+  /// 完成图首帧已经显示，可以清理上一帧预览占位缓存。
+  final VoidCallback? onCompletionPlaceholderSettled;
+
   /// 是否启用选择框
   final bool enableSelection;
 
@@ -106,6 +124,11 @@ class SelectableImageCard extends ConsumerStatefulWidget {
     this.enableContextMenu = true,
     this.enableHoverScale = true,
     this.enableGlossEffect = true,
+    this.hoverEffectsEnabled = true,
+    this.shareWarmupEnabled = true,
+    this.dragPreparationReady = true,
+    this.completionPlaceholderBytes,
+    this.onCompletionPlaceholderSettled,
     this.enableSelection = true,
     this.onUpscale,
     this.onEditImage,
@@ -136,7 +159,19 @@ class SelectableImageCard extends ConsumerStatefulWidget {
 
 class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
     with TickerProviderStateMixin {
+  static const double _dragPreparationProgressValue = 0.96;
+  static const Duration _dragPreparationOverlayFadeDuration =
+      Duration(milliseconds: 140);
+  static const Duration _completionPlaceholderFallbackDuration =
+      Duration(milliseconds: 900);
+
   bool _isHovering = false;
+  late bool _showPreparedIndexBadge;
+  late bool _completedImageHasFrame;
+  bool _completionPlaceholderSettledNotified = false;
+  Uint8List? _precachingCompletedImageBytes;
+  Uint8List? _lastStreamPreviewBytes;
+  Timer? _completionPlaceholderFallbackTimer;
   late AnimationController _glossController;
   late Animation<double> _glossAnimation;
 
@@ -151,6 +186,11 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
   @override
   void initState() {
     super.initState();
+    _lastStreamPreviewBytes =
+        widget.streamPreview?.isNotEmpty == true ? widget.streamPreview : null;
+    _showPreparedIndexBadge = widget.dragPreparationReady;
+    _completedImageHasFrame = _effectiveCompletionPlaceholderBytes == null;
+    _scheduleCompletionPlaceholderFallback();
     _glossController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
@@ -164,6 +204,12 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
       _initGlowAnimation();
     }
     _shareTransferCache = _createShareTransferCache();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scheduleCompletedImagePrecache();
   }
 
   void _initGlowAnimation() {
@@ -190,6 +236,10 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
       _glowAnimation = null;
     }
 
+    if (widget.streamPreview?.isNotEmpty == true) {
+      _lastStreamPreviewBytes = widget.streamPreview;
+    }
+
     if (oldWidget.imageBytes != widget.imageBytes ||
         oldWidget.sourceFilePath != widget.sourceFilePath) {
       final previousCache = _shareTransferCache;
@@ -198,12 +248,34 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
         unawaited(previousCache.dispose());
       }
     }
+
+    if (oldWidget.imageBytes != widget.imageBytes ||
+        oldWidget.completionPlaceholderBytes !=
+            widget.completionPlaceholderBytes ||
+        (oldWidget.isGenerating && !widget.isGenerating)) {
+      _completedImageHasFrame = _effectiveCompletionPlaceholderBytes == null;
+      _completionPlaceholderSettledNotified = false;
+      _precachingCompletedImageBytes = null;
+      _scheduleCompletionPlaceholderFallback();
+      _scheduleCompletedImagePrecache();
+    }
+
+    if ((!widget.hoverEffectsEnabled || !widget.dragPreparationReady) &&
+        _isHovering) {
+      _isHovering = false;
+    }
+
+    if (!widget.dragPreparationReady ||
+        (!oldWidget.dragPreparationReady && widget.dragPreparationReady)) {
+      _showPreparedIndexBadge = false;
+    }
   }
 
   @override
   void dispose() {
     _glossController.dispose();
     _glowController?.dispose();
+    _completionPlaceholderFallbackTimer?.cancel();
     final cache = _shareTransferCache;
     if (cache != null) {
       unawaited(cache.dispose());
@@ -212,7 +284,12 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
   }
 
   void _onHoverEnter() {
-    _warmShareTransferCache();
+    if (widget.shareWarmupEnabled) {
+      _warmShareTransferCache();
+    }
+    if (!widget.hoverEffectsEnabled || !widget.dragPreparationReady) {
+      return;
+    }
     setState(() => _isHovering = true);
     if (widget.enableGlossEffect) {
       _glossController.forward(from: 0.0);
@@ -220,7 +297,89 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
   }
 
   void _onHoverExit() {
+    if (!widget.hoverEffectsEnabled && !_isHovering) {
+      return;
+    }
     setState(() => _isHovering = false);
+  }
+
+  Uint8List? get _effectiveCompletionPlaceholderBytes {
+    if (widget.isGenerating || widget.imageBytes == null) {
+      return null;
+    }
+    return widget.completionPlaceholderBytes ?? _lastStreamPreviewBytes;
+  }
+
+  void _scheduleCompletedImagePrecache() {
+    final imageBytes = widget.imageBytes;
+    if (imageBytes == null ||
+        _effectiveCompletionPlaceholderBytes == null ||
+        _completedImageHasFrame ||
+        identical(_precachingCompletedImageBytes, imageBytes)) {
+      return;
+    }
+
+    _precachingCompletedImageBytes = imageBytes;
+    unawaited(
+      precacheImage(MemoryImage(imageBytes), context).then((_) {
+        if (!mounted ||
+            !identical(_precachingCompletedImageBytes, imageBytes)) {
+          return;
+        }
+        _markCompletedImageReady();
+      }),
+    );
+  }
+
+  void _scheduleCompletionPlaceholderFallback() {
+    _completionPlaceholderFallbackTimer?.cancel();
+    if (_effectiveCompletionPlaceholderBytes == null ||
+        _completedImageHasFrame) {
+      return;
+    }
+
+    _completionPlaceholderFallbackTimer = Timer(
+      _completionPlaceholderFallbackDuration,
+      () {
+        if (!mounted) {
+          return;
+        }
+        _markCompletedImageReady();
+      },
+    );
+  }
+
+  void _markCompletedImageReady() {
+    if (_completedImageHasFrame) {
+      return;
+    }
+    _completionPlaceholderFallbackTimer?.cancel();
+    _completionPlaceholderFallbackTimer = null;
+    setState(() {
+      _completedImageHasFrame = true;
+      _lastStreamPreviewBytes = null;
+    });
+    if (!_completionPlaceholderSettledNotified) {
+      _completionPlaceholderSettledNotified = true;
+      widget.onCompletionPlaceholderSettled?.call();
+    }
+  }
+
+  Widget _buildCompletedImageFrame(
+    BuildContext context,
+    Widget child,
+    int? frame,
+    bool wasSynchronouslyLoaded,
+  ) {
+    if ((frame != null || wasSynchronouslyLoaded) && !_completedImageHasFrame) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _completedImageHasFrame) {
+          return;
+        }
+        _markCompletedImageReady();
+      });
+    }
+    return child;
   }
 
   /// 获取边缘发光颜色
@@ -376,11 +535,15 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
   Widget _buildLoadingCard(
     Color primaryColor,
     Color surfaceColor,
-    ThemeData theme,
-  ) {
-    final progress = widget.progress ?? 0.0;
-    final currentImage = widget.currentImage ?? 0;
-    final totalImages = widget.totalImages ?? 0;
+    ThemeData theme, {
+    double? progressOverride,
+    int? currentImageOverride,
+    int? totalImagesOverride,
+    Key? progressKey,
+  }) {
+    final progress = progressOverride ?? widget.progress ?? 0.0;
+    final currentImage = currentImageOverride ?? widget.currentImage ?? 0;
+    final totalImages = totalImagesOverride ?? widget.totalImages ?? 0;
 
     return AnimatedBuilder(
       animation: _glowAnimation ?? const AlwaysStoppedAnimation(0.2),
@@ -420,6 +583,7 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
                   width: 52,
                   height: 52,
                   child: CircularProgressIndicator(
+                    key: progressKey,
                     value: progress > 0 ? progress : null,
                     strokeWidth: 2.5,
                     backgroundColor: primaryColor.withValues(alpha: 0.1),
@@ -503,6 +667,15 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
     if (widget.imageBytes == null) {
       return const SizedBox.shrink();
     }
+    final showIndexBadge = widget.dragPreparationReady &&
+        _showPreparedIndexBadge &&
+        widget.showIndex &&
+        widget.index != null &&
+        !_isHovering;
+    final indexLabel = widget.index == null ? '' : '${widget.index! + 1}';
+    final completionPlaceholderBytes = _effectiveCompletionPlaceholderBytes;
+    final showCompletionPlaceholder =
+        completionPlaceholderBytes != null && !_completedImageHasFrame;
 
     return MouseRegion(
       onEnter: (_) => _onHoverEnter(),
@@ -576,10 +749,104 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
               fit: StackFit.expand,
               children: [
                 // 1. 图片层
+                if (showCompletionPlaceholder)
+                  RepaintBoundary(
+                    child: DecodedMemoryImage(
+                      key: const ValueKey(
+                        'completed-image-preview-placeholder',
+                      ),
+                      bytes: completionPlaceholderBytes,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
                 RepaintBoundary(
                   child: DecodedMemoryImage(
+                    key: const ValueKey('selectable-image-completed-image'),
                     bytes: widget.imageBytes!,
                     fit: BoxFit.cover,
+                    frameBuilder: _buildCompletedImageFrame,
+                  ),
+                ),
+
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      key: const ValueKey(
+                        'drag-preparation-preview-overlay-opacity',
+                      ),
+                      duration: _dragPreparationOverlayFadeDuration,
+                      curve: Curves.easeOutCubic,
+                      opacity: widget.dragPreparationReady ? 0 : 1,
+                      onEnd: () {
+                        if (!mounted ||
+                            !widget.dragPreparationReady ||
+                            _showPreparedIndexBadge) {
+                          return;
+                        }
+                        setState(() {
+                          _showPreparedIndexBadge = true;
+                        });
+                      },
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.38),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 8,
+                            right: 8,
+                            bottom: 8,
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    key: const ValueKey(
+                                      'drag-preparation-preview-progress-ring',
+                                    ),
+                                    value: _dragPreparationProgressValue,
+                                    strokeWidth: 2,
+                                    backgroundColor:
+                                        Colors.white.withValues(alpha: 0.2),
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Spacer(),
+                                Text(
+                                  '${(_dragPreparationProgressValue * 100).toInt()}%',
+                                  key: const ValueKey(
+                                    'drag-preparation-preview-progress-percent',
+                                  ),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black54,
+                                        blurRadius: 4,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
 
@@ -650,10 +917,14 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
                   ),
 
                 // 7. 左下角：序号
-                if (widget.showIndex && widget.index != null && !_isHovering)
-                  Positioned(
-                    bottom: 8,
-                    left: 8,
+                Positioned(
+                  bottom: 8,
+                  left: 8,
+                  child: Offstage(
+                    key: const ValueKey(
+                      'selectable-image-index-badge-offstage',
+                    ),
+                    offstage: !showIndexBadge,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 6,
@@ -664,7 +935,7 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        '${widget.index! + 1}',
+                        indexLabel,
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 11,
@@ -673,6 +944,7 @@ class _SelectableImageCardState extends ConsumerState<SelectableImageCard>
                       ),
                     ),
                   ),
+                ),
 
                 // 8. 选中覆盖层（使用 IgnorePointer 让点击穿透）
                 if (widget.isSelected)
