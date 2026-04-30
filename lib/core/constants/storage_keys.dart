@@ -244,6 +244,10 @@ class StorageKeys {
   static const String comfyuiEnabled = 'comfyui_enabled';
   static const String comfyuiServerUrl = 'comfyui_server_url';
   static const String comfyuiUpscaleModel = 'comfyui_upscale_model';
+  static const String comfyuiUpscaleRegularModel =
+      'comfyui_upscale_regular_model';
+  static const String comfyuiUpscaleSeedvr2Model =
+      'comfyui_upscale_seedvr2_model';
   static const String comfyuiUpscaleScale = 'comfyui_upscale_scale';
   static const String comfyuiUpscaleBackend = 'comfyui_upscale_backend';
   static const String comfyuiUpscaleModule = 'comfyui_upscale_module';

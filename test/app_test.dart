@@ -1,14 +1,18 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:nai_launcher/app.dart';
 import 'package:nai_launcher/core/comfyui/builtin_workflows.dart';
 import 'package:nai_launcher/core/comfyui/comfyui_url_utils.dart';
 import 'package:nai_launcher/core/comfyui/workflow_node_validator.dart';
 import 'package:nai_launcher/core/comfyui/workflow_template_manager.dart';
+import 'package:nai_launcher/core/constants/storage_keys.dart';
 import 'package:nai_launcher/core/shortcuts/default_shortcuts.dart';
 import 'package:nai_launcher/core/shortcuts/shortcut_config.dart';
 import 'package:nai_launcher/core/utils/file_explorer_utils.dart';
@@ -395,6 +399,96 @@ void main() {
         isComfySeedvr2UpscaleModel('realesrganX4plusAnime_v1.pt'),
         isFalse,
       );
+    });
+  });
+
+  group('Image workflow upscale persistence', () {
+    late Directory hiveTempDir;
+
+    setUpAll(() async {
+      hiveTempDir = await Directory.systemTemp.createTemp(
+        'nai_launcher_app_test_hive_',
+      );
+      Hive.init(hiveTempDir.path);
+      await Hive.openBox(StorageKeys.settingsBox);
+    });
+
+    setUp(() async {
+      await Hive.box(StorageKeys.settingsBox).clear();
+    });
+
+    tearDownAll(() async {
+      if (Hive.isBoxOpen(StorageKeys.settingsBox)) {
+        await Hive.box(StorageKeys.settingsBox).close();
+      }
+      if (await hiveTempDir.exists()) {
+        await hiveTempDir.delete(recursive: true);
+      }
+    });
+
+    test('keeps separate model choices across local upscale modules', () async {
+      const seedvr2Model = 'seedvr2_ema_7b_fp16.safetensors';
+      const regularModel = '4x-UltraSharpV2.pth';
+      final firstContainer = ProviderContainer();
+
+      try {
+        final controller =
+            firstContainer.read(imageWorkflowControllerProvider.notifier);
+
+        controller.updateComfyUpscaleModule(ComfyUpscaleModule.seedvr2);
+        controller.updateUpscaleComfyModel(seedvr2Model);
+        controller.updateComfyUpscaleModule(ComfyUpscaleModule.regular);
+        controller.updateUpscaleComfyModel(regularModel);
+        controller.updateComfyUpscaleModule(ComfyUpscaleModule.rtx);
+        controller.updateComfyUpscaleModule(ComfyUpscaleModule.seedvr2);
+
+        expect(
+          firstContainer
+              .read(imageWorkflowControllerProvider)
+              .upscale
+              .comfyModel,
+          seedvr2Model,
+        );
+
+        controller.updateComfyUpscaleModule(ComfyUpscaleModule.regular);
+
+        expect(
+          firstContainer
+              .read(imageWorkflowControllerProvider)
+              .upscale
+              .comfyModel,
+          regularModel,
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        await Hive.box(StorageKeys.settingsBox).flush();
+      } finally {
+        firstContainer.dispose();
+      }
+
+      final secondContainer = ProviderContainer();
+      try {
+        final workflow = secondContainer.read(imageWorkflowControllerProvider);
+
+        expect(workflow.upscale.comfyModule, ComfyUpscaleModule.regular);
+        expect(workflow.upscale.comfyModel, regularModel);
+        expect(workflow.upscale.comfyRegularModel, regularModel);
+        expect(workflow.upscale.comfySeedvr2Model, seedvr2Model);
+
+        secondContainer
+            .read(imageWorkflowControllerProvider.notifier)
+            .updateComfyUpscaleModule(ComfyUpscaleModule.seedvr2);
+
+        expect(
+          secondContainer
+              .read(imageWorkflowControllerProvider)
+              .upscale
+              .comfyModel,
+          seedvr2Model,
+        );
+      } finally {
+        secondContainer.dispose();
+      }
     });
   });
 

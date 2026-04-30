@@ -31,6 +31,57 @@ import '../../../widgets/image_editor/image_editor_screen.dart';
 import 'img2img_preview_cache.dart';
 import 'comfyui_workflow_dialog.dart';
 
+enum _UpscaleMetricLevel {
+  low,
+  medium,
+  high,
+}
+
+extension _UpscaleMetricLevelX on _UpscaleMetricLevel {
+  double get value {
+    return switch (this) {
+      _UpscaleMetricLevel.low => 0.34,
+      _UpscaleMetricLevel.medium => 0.66,
+      _UpscaleMetricLevel.high => 1.0,
+    };
+  }
+}
+
+class _UpscaleModuleProfile {
+  const _UpscaleModuleProfile({
+    required this.module,
+    required this.speed,
+    required this.vram,
+    required this.quality,
+  });
+
+  final ComfyUpscaleModule module;
+  final _UpscaleMetricLevel speed;
+  final _UpscaleMetricLevel vram;
+  final _UpscaleMetricLevel quality;
+}
+
+const _upscaleModuleProfiles = [
+  _UpscaleModuleProfile(
+    module: ComfyUpscaleModule.regular,
+    speed: _UpscaleMetricLevel.medium,
+    vram: _UpscaleMetricLevel.medium,
+    quality: _UpscaleMetricLevel.medium,
+  ),
+  _UpscaleModuleProfile(
+    module: ComfyUpscaleModule.seedvr2,
+    speed: _UpscaleMetricLevel.low,
+    vram: _UpscaleMetricLevel.high,
+    quality: _UpscaleMetricLevel.high,
+  ),
+  _UpscaleModuleProfile(
+    module: ComfyUpscaleModule.rtx,
+    speed: _UpscaleMetricLevel.high,
+    vram: _UpscaleMetricLevel.low,
+    quality: _UpscaleMetricLevel.medium,
+  ),
+];
+
 /// Img2Img 面板组件
 class Img2ImgPanel extends ConsumerStatefulWidget {
   const Img2ImgPanel({super.key});
@@ -611,6 +662,7 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     final isNai = upscale.backend == UpscaleBackend.novelai;
     final isComfy = upscale.backend == UpscaleBackend.comfyui;
     final comfyModule = upscale.comfyModule;
+    final currentComfyModel = upscale.comfyModelForModule(comfyModule);
 
     final availableModels = ref.watch(comfyUISeedvr2ModelsProvider);
     final moduleModels = filterComfyUpscaleModelsForModule(
@@ -622,7 +674,7 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     final resolvedComfyModel = resolveComfyUpscaleModelForModule(
       availableModels,
       module: comfyModule,
-      currentModel: upscale.comfyModel,
+      currentModel: currentComfyModel,
     );
     final isComfySeedvr2 = comfyModule == ComfyUpscaleModule.seedvr2;
     final isComfyRtx = comfyModule == ComfyUpscaleModule.rtx;
@@ -632,7 +684,7 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
           isComfyBackend: isComfy,
           hasFetchedFromServer: modelsFetchedFromServer,
           availableModels: moduleModels,
-          currentModel: upscale.comfyModel,
+          currentModel: currentComfyModel,
           resolvedModel: resolvedComfyModel,
         )) {
       Future.microtask(
@@ -740,6 +792,11 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
                   visualDensity: VisualDensity.compact,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
+              ),
+              const SizedBox(height: 12),
+              _buildSelectedUpscaleMetrics(
+                theme,
+                selectedModule: comfyModule,
               ),
               const SizedBox(height: 12),
               if (!isComfyRtx) ...[
@@ -926,6 +983,156 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     );
   }
 
+  Widget _buildSelectedUpscaleMetrics(
+    ThemeData theme, {
+    required ComfyUpscaleModule selectedModule,
+  }) {
+    final profile = _profileForModule(selectedModule);
+    final borderRadius = BorderRadius.circular(10);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        border: Border.all(color: Colors.white12),
+        color: Colors.white.withValues(alpha: 0.03),
+      ),
+      child: Column(
+        children: [
+          _buildUpscaleMetricBar(
+            theme,
+            label: '速度',
+            level: profile.speed,
+            higherIsBetter: true,
+            animationKey: '${profile.module.name}_speed',
+          ),
+          const SizedBox(height: 6),
+          _buildUpscaleMetricBar(
+            theme,
+            label: '显存',
+            level: profile.vram,
+            higherIsBetter: false,
+            animationKey: '${profile.module.name}_vram',
+          ),
+          const SizedBox(height: 6),
+          _buildUpscaleMetricBar(
+            theme,
+            label: '效果',
+            level: profile.quality,
+            higherIsBetter: true,
+            animationKey: '${profile.module.name}_quality',
+          ),
+        ],
+      ),
+    );
+  }
+
+  _UpscaleModuleProfile _profileForModule(ComfyUpscaleModule module) {
+    return _upscaleModuleProfiles.firstWhere(
+      (profile) => profile.module == module,
+      orElse: () => _upscaleModuleProfiles.first,
+    );
+  }
+
+  Widget _buildUpscaleMetricBar(
+    ThemeData theme, {
+    required String label,
+    required _UpscaleMetricLevel level,
+    required bool higherIsBetter,
+    required String animationKey,
+  }) {
+    final gradientColors = _metricGradientColors(
+      level,
+      higherIsBetter: higherIsBetter,
+    );
+    return Row(
+      children: [
+        SizedBox(
+          width: 34,
+          child: Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: Colors.white70,
+              height: 1,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: TweenAnimationBuilder<double>(
+            key: ValueKey(animationKey),
+            tween: Tween<double>(begin: 0, end: level.value),
+            duration: const Duration(milliseconds: 460),
+            curve: Curves.easeOutCubic,
+            builder: (context, value, _) {
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: Stack(
+                  children: [
+                    Container(
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.32),
+                      ),
+                    ),
+                    FractionallySizedBox(
+                      widthFactor: value.clamp(0.0, 1.0).toDouble(),
+                      child: Container(
+                        height: 8,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(colors: gradientColors),
+                          boxShadow: [
+                            BoxShadow(
+                              color:
+                                  gradientColors.last.withValues(alpha: 0.32),
+                              blurRadius: 8,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Color> _metricGradientColors(
+    _UpscaleMetricLevel level, {
+    required bool higherIsBetter,
+  }) {
+    if (higherIsBetter) {
+      return switch (level) {
+        _UpscaleMetricLevel.low => const [Color(0xFFF59E0B), Color(0xFFFBBF24)],
+        _UpscaleMetricLevel.medium => const [
+            Color(0xFF38BDF8),
+            Color(0xFF22D3EE),
+          ],
+        _UpscaleMetricLevel.high => const [
+            Color(0xFF34D399),
+            Color(0xFFA3E635),
+          ],
+      };
+    }
+    return switch (level) {
+      _UpscaleMetricLevel.low => const [Color(0xFF34D399), Color(0xFF2DD4BF)],
+      _UpscaleMetricLevel.medium => const [
+          Color(0xFFF59E0B),
+          Color(0xFFFBBF24),
+        ],
+      _UpscaleMetricLevel.high => const [
+          Color(0xFFFB7185),
+          Color(0xFFF43F5E),
+        ],
+    };
+  }
+
   Widget _buildSeedvr2Controls(
     ThemeData theme,
     UpscaleWorkflowSettings upscale,
@@ -1073,7 +1280,9 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     final src = params.sourceImage;
     if (src == null) {
       AppLogger.w(
-          'Start requested but source image is missing', _upscaleLogTag);
+        'Start requested but source image is missing',
+        _upscaleLogTag,
+      );
       return;
     }
 
@@ -1252,7 +1461,9 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
     final bytes = results.last;
 
     AppLogger.d(
-        'SeedVR2 result decode start: bytes=${bytes.length}', _upscaleLogTag);
+      'SeedVR2 result decode start: bytes=${bytes.length}',
+      _upscaleLogTag,
+    );
     final decoded = img.decodeImage(bytes);
     final outW = decoded?.width ?? (decodedSource.width * scale).round();
     final outH = decoded?.height ?? (decodedSource.height * scale).round();
@@ -1434,7 +1645,9 @@ class _Img2ImgPanelState extends ConsumerState<Img2ImgPanel> {
 
     final bytes = results.last;
     AppLogger.d(
-        'RTX result decode start: bytes=${bytes.length}', _upscaleLogTag);
+      'RTX result decode start: bytes=${bytes.length}',
+      _upscaleLogTag,
+    );
     final decoded = img.decodeImage(bytes);
     final outW = decoded?.width ??
         math.max(8, ((decodedSource.width * scale) / 8).round() * 8);
